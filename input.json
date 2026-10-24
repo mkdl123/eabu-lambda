@@ -1,0 +1,4 @@
+{
+  "httpMethod": "POST",
+  "body": "{\"zipcode\":\"19060\",\"service\":\"cooking\",\"description\":\"Eggplant Permissean\",\"address\":\"Local\",\"status\":\"Open\"}"
+}

@@ -1,0 +1,389 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Eabu - a service
+Globals:
+  Function:
+    Runtime: python3.12
+    Layers:
+    - Ref: SharedLayer
+    Environment:
+      Variables:
+        REGION_NAME:
+          Ref: Region
+        EABU_FEEDBACK_TABLE_NAME:
+          Ref: EabuFeedbackTableName
+        EABU_DELETE_TABLE:
+          Ref: EabuDeleteTableName
+        EABU_SERVICE_REQUEST_TABLE:
+          Ref: EabuServiceRequestTableName
+        EABU_USER_TABLE_NAME:
+          Ref: EabuUserTableName
+        EAT_INTERESTED_TABLE_NAME:
+          Ref: EatInterestedTableName
+        LIVE_INTERESTED_TABLE_NAME:
+          Ref: LiveInterestedTableName
+        MOVE_INTERESTED_TABLE_NAME:
+          Ref: MoveInterestedTableName
+        EABU_IDENTITY_TABLE_NAME:
+          Ref: EabuIdentityTableName
+        EAT_CONSUMER_TABLE_NAME:
+          Ref: EatConsumerTableName
+        LIVE_CONSUMER_TABLE_NAME:
+          Ref: LiveConsumerTableName
+        MOVE_CONSUMER_TABLE_NAME:
+          Ref: MoveConsumerTableName
+        EAT_PROVIDER_TABLE_NAME:
+          Ref: EatProviderTableName
+        LIVE_PROVIDER_TABLE_NAME:
+          Ref: LiveProviderTableName
+        MOVE_PROVIDER_TABLE_NAME:
+          Ref: MoveProviderTableName
+        EAT_OFFER_TABLE_NAME:
+          Ref: EatOfferTableName
+        LIVE_OFFER_TABLE_NAME:
+          Ref: LiveOfferTableName
+        MOVE_OFFER_TABLE_NAME:
+          Ref: MoveOfferTableName
+        AD_TABLE_NAME:
+          Ref: AdTableName
+        AD_TABLE_REQ:
+          Ref: AdTableReqName
+        FOLLOWERS_TABLE_NAME:
+          Ref: FollowersTableName
+        NOTIFICATION_FUNCTION_ARN:
+          Ref: NotificationFunctionArn
+    MemorySize: 256
+    Timeout: 30
+
+Parameters:
+  NotificationFunctionArn:
+    Type: String
+  xApiKey:
+    Type: String
+    NoEcho: true
+
+  NotificationFunctionName:
+    Type: String
+    Default: EabuNotificationFunction
+
+  EabuFeedbackTableName:
+    Type: String
+    Default: eabu-feedback
+
+  EabuDeleteTableName:
+    Type: String
+    Default: eabu-delete
+
+  EabuServiceRequestTableName:
+    Type: String
+    Default: eabu-service-request
+
+  EabuUserTableName:
+    Type: String
+    Default: eabu-users
+
+  FollowersTableName:
+    Type: String
+    Default: eabu-followers
+
+  AdTableReqName:
+    Type: String
+    Default: eabu-ad-req
+
+  AdTableName:
+    Type: String
+    Default: eabu-advertisement
+
+  MoveOfferTableName:
+    Type: String
+    Default: eabu-move-offer
+  LiveOfferTableName:
+    Type: String
+    Default: eabu-live-offer
+  EatOfferTableName:
+    Type: String
+    Default: eabu-eat-offer
+
+  EatInterestedTableName:
+    Type: String
+    Default: eabu-eat-interested
+  LiveInterestedTableName:
+    Type: String
+    Default: eabu-live-interested
+  MoveInterestedTableName:
+    Type: String
+    Default: eabu-move-interested
+  EabuIdentityTableName:
+    Type: String
+    Default: eabu-identity
+  EatConsumerTableName:
+    Type: String
+    Default: eabu-eat-consumer
+  LiveConsumerTableName:
+    Type: String
+    Default: eabu-live-consumer
+  MoveConsumerTableName:
+    Type: String
+    Default: eabu-move-consumer
+  EatProviderTableName:
+    Type: String
+    Default: eabu-eat-provider
+  LiveProviderTableName:
+    Type: String
+    Default: eabu-live-provider
+  MoveProviderTableName:
+    Type: String
+    Default: eabu-move-provider
+  Region:
+    Type: String
+    Default: us-east-1
+
+Resources:
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: shared-utils
+      Description: Common helpers and resources for all functions
+      ContentUri: eabu-dish
+      CompatibleRuntimes:
+        - python3.12
+
+  EabuFeedbackSubmitFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-feedback-submit
+      Handler: app.lambda_handler
+
+  EabuFeedbackFormFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-feedback-form
+      Handler: app.lambda_handler
+
+  EabuHomePageFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-home
+      Handler: app.lambda_handler
+
+  EabuDeleteUserInfoFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-delete-user-info
+      Handler: app.lambda_handler
+
+  EabuConsumerRepostFuctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-repost
+      Handler: app.lambda_handler
+  EabuServiceRequestFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-service-request
+      Handler: app.lambda_handler
+  EabuProviderRepostFuctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-repost
+      Handler: app.lambda_handler
+
+  EabuUserZipcodeFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-user-zip
+      Handler: app.lambda_handler
+
+  EabuGetUserFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-get-user
+      Handler: app.lambda_handler
+
+  EabuCheckUserInterestedFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-check-interested
+      Handler: app.lambda_handler
+
+  EabuPostUserInterestedFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-update-interested
+      Handler: app.lambda_handler
+
+  EabuGetUserRatingsFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-get-user-ratings
+      Handler: app.lambda_handler
+
+  EabuUpdateRatingsFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-update-ratings
+      Handler: app.lambda_handler
+  EabuUserFunctionName:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-user
+      Handler: app.lambda_handler
+
+  EabuIdentityCheckFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-identity-check
+      Handler: app.lambda_handler
+
+  ProviderGetMoveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-get-move
+      Handler: app.lambda_handler
+
+  ProviderGetLiveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-get-live
+      Handler: app.lambda_handler
+
+  ProviderGetEatFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-get-eat
+      Handler: app.lambda_handler
+
+  ProviderPostMoveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-post-move
+      Handler: app.lambda_handler
+
+  ProviderPostLiveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-post-live
+      Handler: app.lambda_handler
+
+  ProviderPostEatFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-post-eat
+      Handler: app.lambda_handler
+
+  ConsumerPostMoveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-post-move
+      Handler: app.lambda_handler
+
+  ConsumerPostLiveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-post-live
+      Handler: app.lambda_handler
+
+  ConsumerPostEatFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-post-eat
+      Handler: app.lambda_handler
+
+  ConsumerGetMoveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-get-move
+      Handler: app.lambda_handler
+
+  ConsumerGetLiveFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-get-live
+      Handler: app.lambda_handler
+
+  ConsumerGetEatFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-get-eat
+      Handler: app.lambda_handler
+
+  EatOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-offer-eat
+      Handler: app.lambda_handler
+
+  LiveOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-offer-live
+      Handler: app.lambda_handler
+
+  MoveOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-offer-move
+      Handler: app.lambda_handler
+
+  ConsumerReceivedMoveOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-move-offers
+      Handler: app.lambda_handler
+
+  ConsumerReceivedLiveOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-live-offers
+      Handler: app.lambda_handler
+
+  ConsumerReceivedEatOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-eat-offers
+      Handler: app.lambda_handler
+
+  ProviderMyMoveServicesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-my-move-services
+      Handler: app.lambda_handler
+
+  ProviderMyLiveServicesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-my-live-services
+      Handler: app.lambda_handler
+
+  ProviderMyEatServicesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-my-eat-services
+      Handler: app.lambda_handler
+
+  ProviderUploadIdentityPictures:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-identity
+      Handler: app.lambda_handler
+
+  EabuAdvertisement:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-advertisement-get
+      Handler: app.lambda_handler
+
+  EabuAdRequest:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-advertisement-post
+      Handler: app.lambda_handler
+
+
+
+  EabuNotificationFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/eabu-notification
+      Handler: app.lambda_handler
