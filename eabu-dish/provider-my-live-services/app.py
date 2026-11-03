@@ -3,6 +3,7 @@ import logging
 import os
 from decimal import Decimal
 
+from my_utils import helpers
 import boto3
 from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Attr
@@ -25,7 +26,6 @@ def decimal_serializer(obj):
 
 
 def lambda_handler(event, context):
-    logger.info('Received event: %s', json.dumps(event, indent=2))
     current_timestamp = datetime.now().isoformat()
 
     print(current_timestamp)
@@ -45,6 +45,10 @@ def lambda_handler(event, context):
 
     #id = event['pathParameters']['id']
     userId = event['pathParameters']['userId']
+
+    denied = helpers.authorize_user(event, userId)
+    if denied:
+        return denied
     print("Parameter userId: ",userId);
 
     thirty_days_ago = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())

@@ -74,6 +74,9 @@ def lambda_handler(event, context):
     try:
         # Extract parameters from path and body
         user_id = str(event['pathParameters']['cUserId'])
+        denied = helpers.authorize_user(event, user_id)
+        if denied:
+            return denied
         item_id = int(event['pathParameters']['itemId'])
         provider_type = str(event['pathParameters']['providerType'])
 
@@ -98,8 +101,6 @@ def lambda_handler(event, context):
         return helpers._response(
             500,
             {
-                "msg": "Failed to retrieve item in DynamoDB"
-                       + " Table Type: " + provider_type
-                       + " Region: " + REGION_NAME
+                "msg": "Failed to retrieve item"
             },
         )

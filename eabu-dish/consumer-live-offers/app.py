@@ -3,6 +3,7 @@ import logging
 import os
 from decimal import Decimal
 
+from my_utils import helpers
 import boto3
 from datetime import datetime
 
@@ -24,7 +25,6 @@ def decimal_serializer(obj):
 
 
 def lambda_handler(event, context):
-    logger.info('Received event: %s', json.dumps(event, indent=2))
     current_timestamp = datetime.now().isoformat()
 
     print(current_timestamp)
@@ -44,6 +44,10 @@ def lambda_handler(event, context):
 
     #id = event['pathParameters']['id']
     userid = event['pathParameters']['userId']
+
+    denied = helpers.authorize_user(event, userid)
+    if denied:
+        return denied
     #print("Parameter id: ",id);
     print("Parameter userId: ",userid);
 

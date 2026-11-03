@@ -16,9 +16,6 @@ ses = boto3.client('ses', region_name=region)
 
 def send_email(recipient_email, subject, body):
     try:
-        print("Sending email to: ", recipient_email)
-        print("Subject: ", subject)
-        print("Body: ", body)
         sender_email = os.environ.get("SENDER_EMAIL", "eabu@eabu.net")
         response = ses.send_email(
             Source=sender_email,
@@ -53,7 +50,6 @@ def lambda_handler(event, context):
         user_id = item['userId']
 
         follower_email = get_follower_emails(user_id)
-        print("Follower Email: ",follower_email);
         if not follower_email:
             logger.info("No followers found to notify")
             return {'statusCode': 200, 'message': 'No followers to notify'}

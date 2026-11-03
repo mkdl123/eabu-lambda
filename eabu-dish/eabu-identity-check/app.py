@@ -3,6 +3,7 @@ import logging
 import os
 from decimal import Decimal
 
+from my_utils import helpers
 import boto3
 from datetime import datetime
 from boto3.dynamodb.conditions import Attr
@@ -25,7 +26,6 @@ def decimal_serializer(obj):
 
 
 def lambda_handler(event, context):
-    logger.info('Received event: %s', json.dumps(event, indent=2))
     current_timestamp = datetime.now().isoformat()
 
     print(current_timestamp)
@@ -46,7 +46,10 @@ def lambda_handler(event, context):
     #id = event['pathParameters']['id']
     userId = event['pathParameters']['userId']
     #print("Parameter id: ",id);
-    print("Parameter userId: ",userId);
+
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
 
 
 
@@ -60,6 +63,15 @@ def lambda_handler(event, context):
              KeyConditionExpression =  "userId = :userId",
              ExpressionAttributeValues = {':userId': userId }
         )
+
+        if not helpers.is_owner(event, userId):
+            # Other users may only learn whether this user is verified -
+            # never their name, email, phone or address.
+            public_fields = ("userId", "verified", "submitted")
+            response = {
+                "Items": [{k: i[k] for k in public_fields if k in i} for i in response.get("Items", [])],
+                "Count": response.get("Count", 0),
+            }
 
         return {
             'statusCode': 200,

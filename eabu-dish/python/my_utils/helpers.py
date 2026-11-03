@@ -44,6 +44,73 @@ def _response(status: int, body: dict):
         "body": json.dumps(body),
     }
 
+# ---------------------------------------------------------------------------
+# Authentication / authorization
+#
+# The caller's identity comes ONLY from the Cognito claims that API Gateway
+# places in event["requestContext"] after its Cognito authorizer has verified
+# the token. Clients cannot forge requestContext. Never trust a userId that
+# arrives in the body, path or query string without comparing it to this.
+#
+# AUTH_MODE:
+#   "off"     - (default) allow requests as before, but log every request that
+#               WOULD be rejected. Use this while rolling the authorizer out.
+#   "enforce" - reject unauthenticated (401) and mismatched (403) requests.
+# AUTH_USER_ID_CLAIM: which Cognito claim equals the app's userId ("sub" by
+#   default; use "cognito:username" if the app stores the username).
+# ---------------------------------------------------------------------------
+
+def auth_enforced() -> bool:
+    return os.environ.get("AUTH_MODE", "off").strip().lower() == "enforce"
+
+
+def get_caller_id(event):
+    """Return the authenticated caller's user id, or None if unauthenticated."""
+    rc = (event or {}).get("requestContext") or {}
+    authorizer = rc.get("authorizer") or {}
+    # REST API Cognito authorizer -> authorizer.claims; HTTP API JWT authorizer -> authorizer.jwt.claims
+    claims = authorizer.get("claims") or (authorizer.get("jwt") or {}).get("claims") or {}
+    value = claims.get(os.environ.get("AUTH_USER_ID_CLAIM", "sub"))
+    return str(value) if value else None
+
+
+def require_authenticated(event):
+    """Return None if the caller is signed in (or auth is not enforced), else a 401 response."""
+    if get_caller_id(event) is not None:
+        return None
+    if not auth_enforced():
+        logger.warning("AUTH not enforced: would reject unauthenticated request to %s", (event or {}).get("resource"))
+        return None
+    return _response(401, {"msg": "Unauthorized"})
+
+
+def authorize_user(event, claimed_user_id):
+    """
+    Ensure the user id the client claims to act as is the authenticated caller.
+    Return None if allowed, otherwise a 401/403 response to return immediately.
+    """
+    caller = get_caller_id(event)
+    if caller is not None and claimed_user_id is not None and str(claimed_user_id) == caller:
+        return None
+    if not auth_enforced():
+        logger.warning(
+            "AUTH not enforced: would reject request to %s (caller=%s, claimed=%s)",
+            (event or {}).get("resource"), caller, claimed_user_id,
+        )
+        return None
+    if caller is None:
+        return _response(401, {"msg": "Unauthorized"})
+    return _response(403, {"msg": "Forbidden"})
+
+
+def is_owner(event, user_id) -> bool:
+    """True if the caller owns user_id. Always True while auth is not enforced."""
+    caller = get_caller_id(event)
+    if caller is not None and user_id is not None and str(user_id) == caller:
+        return True
+    return not auth_enforced()
+
+
 def increment_counter(partition_key, table, counter_attribute='total_count'):
 
         response = table.update_item(

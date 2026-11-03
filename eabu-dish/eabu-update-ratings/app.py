@@ -97,6 +97,15 @@ def _ensure_rated_item_exists(provider_type: str, ID: int, cUserId: str):
         raise
 
 
+def _remove_rated_item(provider_type: str, ID: int, cUserId: str):
+    """Roll back the 'already rated' marker when the provider update did not apply."""
+    rated_table, rated_table_name = _get_rated_table_for_provider(provider_type)
+    try:
+        rated_table.delete_item(Key={"ID": ID, "cUserId": cUserId})
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to roll back rated item in %s", rated_table_name)
+
+
 def lambda_handler(event, context):
     logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
 
@@ -111,14 +120,26 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("cUserId"))
+    if denied:
+        return denied
+
     provider_type = payload.get("providerType", "eat")
     table, table_name = _get_table_for_provider(provider_type)
 
-    zipcode = str(payload["zipcode"])
-    ID = int(payload["ID"])
-    totalstars = int(payload["totalstars"])
-    ratingscount = int(payload["ratingscount"])
-    cUserId = str(payload["cUserId"])
+    try:
+        zipcode = str(payload["zipcode"])
+        ID = int(payload["ID"])
+        totalstars = int(payload["totalstars"])
+        ratingscount = int(payload["ratingscount"])
+        cUserId = str(payload["cUserId"])
+    except (TypeError, ValueError):
+        return helpers._response(400, {"msg": "Invalid rating payload"})
+
+    # A single rating adds exactly 1 to the count and 1..5 stars to the total.
+    if ratingscount < 1 or totalstars < 1 or totalstars > 5 * ratingscount:
+        return helpers._response(400, {"msg": "Invalid rating values"})
 
     # 1) Ensure row exists in appropriate *-rated table
     try:
@@ -128,9 +149,7 @@ def lambda_handler(event, context):
             500,
             {
                 "msg": "Failed to update rated table "
-                + " Rated Table for providerType: " + provider_type
-                + " Region: " + REGION_NAME
-            },
+                },
         )
 
     # If the row already existed, stop and tell the caller
@@ -143,7 +162,20 @@ def lambda_handler(event, context):
             }
         )
 
-    # 2) Update the provider table rating as before
+    # 2) Update the provider table rating. Only accept exactly one new 1-5 star
+    #    vote on top of the stored values; reject arbitrary overwrites of the totals.
+    if ratingscount == 1:
+        condition = (
+            "attribute_exists(zipcode) AND attribute_exists(ID) "
+            "AND (attribute_not_exists(ratingscount) OR ratingscount = :prev_rc) "
+            "AND (attribute_not_exists(totalstars) OR (totalstars >= :min_prev_ts AND totalstars <= :max_prev_ts))"
+        )
+    else:
+        condition = (
+            "attribute_exists(zipcode) AND attribute_exists(ID) "
+            "AND ratingscount = :prev_rc "
+            "AND totalstars >= :min_prev_ts AND totalstars <= :max_prev_ts"
+        )
     try:
         response = table.update_item(
             Key={
@@ -154,34 +186,29 @@ def lambda_handler(event, context):
             ExpressionAttributeValues={
                 ":ts": totalstars,
                 ":rc": ratingscount,
+                ":prev_rc": ratingscount - 1,
+                ":min_prev_ts": totalstars - 5,
+                ":max_prev_ts": totalstars - 1,
             },
-            ConditionExpression="attribute_exists(zipcode) AND attribute_exists(ID)",
+            ConditionExpression=condition,
             ReturnValues="UPDATED_NEW",
         )
     except table.meta.client.exceptions.ConditionalCheckFailedException:
         logger.warning(
-            "Item not found in %s: zipcode=%s, ID=%s",
-            table_name,
-            zipcode,
-            ID
+            "Rating rejected for %s: zipcode=%s, ID=%s, ts=%s, rc=%s",
+            table_name, zipcode, ID, totalstars, ratingscount,
         )
-        return helpers._response(404, {"msg": f"Item not found in {table_name}"})
+        _remove_rated_item(provider_type, ID, cUserId)
+        return helpers._response(409, {"msg": "Rating could not be applied; refresh and try again"})
     except (BotoCoreError, ClientError):
         logger.exception("Failed to update item in DynamoDB")
-        return helpers._response(
-            500,
-            {
-                "msg": "Failed to update provider rating"
-                       + " Table Name: " + table_name
-                       + " Region: " + REGION_NAME
-            },
-        )
+        _remove_rated_item(provider_type, ID, cUserId)
+        return helpers._response(500, {"msg": "Failed to update provider rating"})
 
     return helpers._response(
         200,
         {
             "message": "Rating updated",
             "providerType": provider_type,
-            "table": table_name,
         }
     )

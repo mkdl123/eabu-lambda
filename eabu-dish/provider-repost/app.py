@@ -61,6 +61,17 @@ def lambda_handler(event, context):
     zipcode = str(payload["zipcode"])
     created_at = datetime.now(timezone.utc).isoformat()
 
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
+
+    # Only the owner of a listing may repost it.
+    condition = "attribute_exists(ID)"
+    values = {":createdAt": created_at}
+    if helpers.auth_enforced():
+        condition += " AND userId = :caller"
+        values[":caller"] = helpers.get_caller_id(event)
+
     try:
         # 1) Query by the (userId, itemId) GSI to locate the exact record.
         # Assumes index keys are: partition key = userId, sort key = itemId
@@ -72,11 +83,8 @@ def lambda_handler(event, context):
                 "ID": item_id
             },
             UpdateExpression="SET createdAt = :createdAt",
-            ConditionExpression="attribute_exists(ID)",
-            ExpressionAttributeValues={
-                ":createdAt": created_at
-
-            },
+            ConditionExpression=condition,
+            ExpressionAttributeValues=values,
         )
 
     except ClientError as e:
@@ -85,13 +93,13 @@ def lambda_handler(event, context):
         logger.exception("Failed to update item in DynamoDB")
         return helpers._response(
             500,
-            {"msg": "Failed to update item" + " Table Name: " + table_name + " Region: " + region},
+            {"msg": "Failed to update item"},
         )
     except (BotoCoreError, ValueError):
         logger.exception("Failed to update item in DynamoDB")
         return helpers._response(
             500,
-            {"msg": "Failed to update item" + " Table Name: " + table_name + " Region: " + region},
+            {"msg": "Failed to update item"},
         )
 
     return helpers._response(200, {"message": "Item updated", "itemId": item_id,  "createdAt": created_at})

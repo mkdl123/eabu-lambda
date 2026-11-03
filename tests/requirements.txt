@@ -1,0 +1,4 @@
+pytest
+boto3
+moto[dynamodb,s3]>=5
+Pillow==11.3.0

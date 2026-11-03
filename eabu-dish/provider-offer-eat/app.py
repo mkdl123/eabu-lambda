@@ -35,9 +35,6 @@ def lambda_handler(event, context):
     logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
 
     #Get new DishID
-    partition_key = 100  # Replace 'your_partition_key'
-    new_counter_value = helpers.increment_counter(partition_key, table)
-    print(f'New counter value: {new_counter_value}')
 
     # Ensure method and body are valid
     if event.get("httpMethod") != "POST":
@@ -50,6 +47,14 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("pUserId"))
+    if denied:
+        return denied
+
+    partition_key = 100  # Replace 'your_partition_key'
+    new_counter_value = helpers.increment_counter(partition_key, table)
+    print(f'New counter value: {new_counter_value}')
     item = {
         "ID": int(new_counter_value),
         "zipcode": str(payload["zip"]),
@@ -72,6 +77,6 @@ def lambda_handler(event, context):
         table.put_item(Item=item)
     except (BotoCoreError, ClientError) as e:
         logger.exception("Failed to write item to DynamoDB")
-        return helpers._response(500, {"msg": "Failed to create dish" + "Table Name: " + table_name + " Region: " + region})
+        return helpers._response(500, {"msg": "Failed to create dish"})
 
     return helpers._response(200, {"message": "Recipe posted ", "Item ID": item["itemId"]})

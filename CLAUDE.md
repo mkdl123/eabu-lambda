@@ -98,6 +98,13 @@ Functions follow a `{role}-{action}-{category}` pattern:
 - `consumer-get-{eat|live|move}` — consumer browses available services by zipcode
 - `consumer-{eat|live|move}-offers` — consumer views offers received
 
+### Security conventions
+
+- **Caller identity**: never trust a `userId`/`cUserId`/`pUserId` from the body, path or query. Compare it to the authenticated caller with `helpers.authorize_user(event, claimed_id)` (or `helpers.require_authenticated(event)` / `helpers.is_owner(...)`). The caller comes from the API Gateway Cognito authorizer claims in `event['requestContext']`. `AUTH_MODE` (`off` = log would-be rejections, `enforce` = reject) and `AUTH_USER_ID_CLAIM` are template parameters.
+- **IAM**: every function in `template.yaml` has its own least-privilege `Policies` block listing only the tables/actions/objects it uses. A new function or a new DynamoDB/S3/SES call needs a matching policy entry, or it will get AccessDenied.
+- **Identity data**: never log request bodies, images or PII; never return `str(e)`, table names or region in responses. The identity bucket is hardened by `scripts/harden-identity-bucket.sh` (run from CloudShell).
+- Security regression tests live in `tests/unit/test_security.py` (moto-based).
+
 ### Get functions: query pattern
 
 GET functions query DynamoDB by `zipcode` (partition key) + `ID > 0`, filtered to records created within the last 30 days. When a `userId` path parameter is not `"NA"`, they instead query a `userId-index` GSI to return only that user's items.

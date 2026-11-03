@@ -11,6 +11,8 @@ from boto3.dynamodb.conditions import Key
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+NON_PUBLIC_STATUSES = {"pending", "rejected"}
+
 SUBMIT_URL = "https://www.eabu.net/feedback/submit"
 
 HTML_PAGE = f"""<!doctype html>
@@ -192,10 +194,6 @@ def decimal_serializer(obj):
 
 
 def lambda_handler(event, context):
-    print('Request headers: %s', json.dumps(event['headers']))
-    userId = event['headers'].get('x-user-id')
-    print("User ID : ", userId)
-    logger.info('Received event: %s', json.dumps(event, indent=2))
     current_timestamp = datetime.now().isoformat()
 
     print(current_timestamp)
@@ -213,6 +211,14 @@ def lambda_handler(event, context):
 
     table = post_table.Table(table_name)
     status = event['pathParameters']['status']
+
+    # Pending/rejected ad requests hold submitters' private contact details and
+    # unreviewed content; only published statuses may be listed publicly.
+    if str(status).strip().lower() in NON_PUBLIC_STATUSES:
+        return {
+            'statusCode': 403,
+            'body': json.dumps({'msg': 'Forbidden'})
+        }
 
     try:
         response = table.query(

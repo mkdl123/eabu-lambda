@@ -1,8 +1,12 @@
 import json
+import logging
 import os
+from my_utils import helpers
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Key
+
+logger = logging.getLogger(__name__)
 
 # Initialize AWS resources
 region = os.environ.get('REGION_NAME', 'us-east-1')
@@ -12,6 +16,10 @@ table = dynamodb.Table(table_name)
 
 def lambda_handler(event, context):
     param = str(event['pathParameters']['param'])
+
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
 
     if not param or param == "NA":
         return {
@@ -50,9 +58,10 @@ def lambda_handler(event, context):
                 "body": json.dumps({"message": "User not found"})
             }
 
-    except (BotoCoreError, ClientError) as e:
+    except (BotoCoreError, ClientError):
+        logger.exception("Database lookup failed")
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"message": "Database lookup failed", "error": str(e)})
+            "body": json.dumps({"message": "Database lookup failed"})
         }

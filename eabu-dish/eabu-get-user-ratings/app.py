@@ -2,6 +2,7 @@ import json
 import logging
 import os
 
+from my_utils import helpers
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
@@ -107,6 +108,10 @@ def lambda_handler(event, context):
     logger.info("Received event: %s", json.dumps({k: event.get(k) for k in ("httpMethod", "queryStringParameters")}))
 
     pUserId = event['pathParameters']['pUserId']
+
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
     # print("Parameter id: ",id);
     print("Parameter userId: ", pUserId);
     if not pUserId:

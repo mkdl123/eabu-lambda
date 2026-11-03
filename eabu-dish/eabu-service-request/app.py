@@ -40,6 +40,11 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("userId"))
+    if denied:
+        return denied
+
 
     item = {
 
@@ -57,6 +62,6 @@ def lambda_handler(event, context):
     except (BotoCoreError, ClientError) as e:
         logger.exception("Failed to write item to DynamoDB")
         return helpers._response(500,
-                                 {"msg": "Failed to create record" + "Table Name: " + table_name + " Region: " + region})
+                                 {"msg": "Failed to create record"})
 
     return helpers._response(200, {"message": "Message posted, we will contact you soon "})

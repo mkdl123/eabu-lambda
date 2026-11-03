@@ -8,6 +8,8 @@ import base64
 from datetime import datetime
 from typing import Dict, Any
 import io
+import re
+import warnings
 from PIL import Image, ExifTags
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -17,11 +19,16 @@ logger.setLevel(logging.INFO)
 
 # Initialize S3 client
 s3_client = boto3.client('s3')
-BUCKET_NAME = 'eabu-identity-pictures'
+BUCKET_NAME = os.environ.get('IDENTITY_BUCKET_NAME', 'eabu-identity-pictures')
 MAX_FILE_SIZE = 10 * 1024 * 1024
+ALLOWED_IMAGE_FORMATS = ["JPEG", "PNG", "WEBP"]
+# userId becomes an S3 key prefix, so restrict it to a safe character set (no '/', no '..').
+USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_@.+:-]{1,128}$")
 
-dynamodb = boto3.resource('dynamodb')
-table1 = dynamodb.Table('eabu-identity') # Replace 'YourTableName'
+# Guard against decompression bombs: refuse anything over ~50 megapixels.
+Image.MAX_IMAGE_PIXELS = 50_000_000
+warnings.simplefilter("error", Image.DecompressionBombWarning)
+
 # Resolve environment configuration
 table_name = os.environ.get('EABU_IDENTITY_TABLE_NAME', 'eabu-identity')
 region = os.environ.get('REGION_NAME', 'us-east-1')
@@ -43,13 +50,14 @@ def validate_image_base64(base64_data: str, image_type: str) -> bytes:
         if len(image_data) > MAX_FILE_SIZE:
             raise ValueError(f"{image_type} image exceeds maximum size of 10MB")
         
-        # Verify it's a valid image
-        img = Image.open(io.BytesIO(image_data))
+        # Verify it's a valid image in an allowed format
+        img = Image.open(io.BytesIO(image_data), formats=ALLOWED_IMAGE_FORMATS)
         img.verify()
-        
+
         return image_data
     except Exception as e:
-        raise ValueError(f"Invalid {image_type} image: {str(e)}")
+        logger.warning("Rejected %s image: %s", image_type, e)
+        raise ValueError(f"Invalid {image_type} image")
 
 def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
     """Optimize image before upload"""
@@ -69,9 +77,8 @@ def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
                 break
 
         image = img;
-        exif = img._getexif()
-        if exif is not None:
-            print("Exif found")
+        exif = img.getexif()
+        if exif:
             orientation_value = exif.get(orientation)
             if orientation_value == 3:
                 image = img.rotate(180, expand=True)
@@ -79,13 +86,16 @@ def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
                 image = img.rotate(270, expand=True)
             elif orientation_value == 8:
                 image = img.rotate(90, expand=True)
-        # Save optimized image
+        # Save optimized image (re-encoding also strips EXIF metadata such as GPS location)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG', quality=90, optimize=True)
         return buffer.getvalue()
     except Exception as e:
-        logger.error(f"Image optimization failed: {str(e)}")
-        return image_data
+        # Never upload the raw, unprocessed bytes if re-encoding failed.
+        logger.error("Image optimization failed: %s", e)
+        raise ValueError("Image could not be processed")
 
 def upload_to_s3(image_data: bytes, user_id: str, image_type: str, timestamp: str) -> str:
     """Upload image to S3 and return the URL"""
@@ -101,94 +111,106 @@ def upload_to_s3(image_data: bytes, user_id: str, image_type: str, timestamp: st
         
         return f"s3://{BUCKET_NAME}/{s3_key}"
     except Exception as e:
-        raise Exception(f"Failed to upload {image_type}: {str(e)}")
+        logger.error("Failed to upload %s: %s", image_type, e)
+        raise Exception(f"Failed to upload {image_type}")
 
 def lambda_handler(event, context):
     try:
         # Parse JSON body
         if not event.get('body'):
-            print("No body found")
             return {
                 'statusCode': 400,
                 'body': json.dumps({'error': 'Request body is required'})
             }
             
         try:
-            body = json.loads(event['body'])
-            print("Body: ",body)
-        except json.JSONDecodeError:
+            body = helpers._parse_body(event)
+        except ValueError:
             return {
                 'statusCode': 400,
                 'body': json.dumps({'error': 'Invalid JSON format'})
             }
-        
+        if not isinstance(body, dict):
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Invalid JSON format'})
+            }
+
         # Validate required fields
         required_fields = ['user_id', 'selfie', 'license_front', 'license_back', 'address', 'full_name', 'email', 'phone']
         missing_fields = [field for field in required_fields if field not in body]
-        
+
         if missing_fields:
-            print("Missing fields: ",missing_fields)
             return {
                 'statusCode': 400,
                 'body': json.dumps({
                     'error': f'Missing required fields: {", ".join(missing_fields)}'
                 })
             }
-        
-        user_id = body['user_id']
-        print("User ID: ",user_id);
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        print("Timestamp: ",timestamp);
-        uploaded_files = {}
-        
-        # Process each image
-        images_to_process = {
-            'selfie': body['selfie'],
-            'license_front': body['license_front'],
-            'license_back': body['license_back']
-        }
 
-        for image_type, base64_data in images_to_process.items():
+        user_id = body['user_id']
+        if not isinstance(user_id, str) or not USER_ID_PATTERN.match(user_id) or ".." in user_id:
+            return helpers._response(400, {"msg": "Invalid user_id"})
+
+        # Only the signed-in user may submit their own identity documents.
+        denied = helpers.authorize_user(event, user_id)
+        if denied:
+            return denied
+
+        # Do not let a submission overwrite an identity that has already been verified.
+        try:
+            existing = table.query(
+                KeyConditionExpression="userId = :userId",
+                ExpressionAttributeValues={':userId': user_id},
+                Limit=1,
+            ).get('Items', [])
+        except (BotoCoreError, ClientError):
+            logger.exception("Failed to read existing identity record")
+            return helpers._response(500, {"msg": "Failed to enter User Identity record"})
+        if existing and existing[0].get('verified') is True:
+            return helpers._response(409, {"msg": "Identity already verified; contact support to change it"})
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        uploaded_files = {}
+
+        # Validate and re-encode every image before uploading any of them,
+        # so a bad image cannot leave a partially-overwritten set in S3.
+        processed = {}
+        for image_type in ('selfie', 'license_front', 'license_back'):
+            base64_data = body[image_type]
+            if not isinstance(base64_data, str):
+                return helpers._response(400, {"msg": f"Error processing {image_type}"})
             try:
-                # Validate and decode base64 image
                 image_data = validate_image_base64(base64_data, image_type)
-                
-                # Optimize image
-                optimized_data = optimize_image(image_data)
-                
-                # Upload to S3
-                s3_url = upload_to_s3(optimized_data, user_id, image_type, timestamp)
-                
-                uploaded_files[image_type] = s3_url
-                
-            except Exception as e:
+                processed[image_type] = optimize_image(image_data)
+            except Exception:
                 return {
                     'statusCode': 400,
-                    'body': json.dumps({
-                        'error': f'Error processing {image_type}',
-                        'details': str(e)
-                    })
+                    'body': json.dumps({'error': f'Error processing {image_type}'})
                 }
 
+        for image_type, optimized_data in processed.items():
+            try:
+                uploaded_files[image_type] = upload_to_s3(optimized_data, user_id, image_type, timestamp)
+            except Exception:
+                return helpers._response(500, {"msg": f"Failed to upload {image_type}"})
 
         try:
             # go for a record entry in eabu-identity table:
-            payload = helpers._parse_body(event)
             item = {
-
                 "userId": user_id,
                 "submitted": True,
                 "verified": False,
-                "fullname":payload["full_name"] if isinstance(payload["full_name"], str) else str(payload["full_name"]),
-                "email": payload["email"] if isinstance(payload["email"], str) else str(payload["email"]),
-                "phone": payload["phone"] if isinstance(payload["phone"], str) else str(payload["phone"]),
-                "address": payload["address"] if isinstance(payload["address"], str) else str(payload["address"]),
+                "fullname": str(body["full_name"])[:200],
+                "email": str(body["email"])[:254],
+                "phone": str(body["phone"])[:32],
+                "address": str(body["address"])[:500],
             }
             table.put_item(Item=item)
         except (BotoCoreError, ClientError) as e:
             logger.exception("Failed to write item to DynamoDB")
             return helpers._response(500, {
-                "msg": "Failed to enter User Idenity record" + "Table Name: " + table_name + " Region: " + region})
+                "msg": "Failed to enter User Identity record"})
 
         #return helpers._response(200, {"message": "Recipe posted ", "ID": item["ID"]})
         # Return success response
@@ -206,12 +228,11 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        logger.error(f"Lambda execution failed: {str(e)}")
+        logger.exception("Lambda execution failed")
         return {
             'statusCode': 500,
             'body': json.dumps({
-                'error': 'Internal server error',
-                'details': str(e)
+                'error': 'Internal server error'
             }),
             'headers': {
                 'Content-Type': 'application/json'

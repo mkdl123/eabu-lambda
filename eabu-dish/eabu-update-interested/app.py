@@ -96,6 +96,15 @@ def _ensure_interested_item_exists(provider_type: str, ID: int, cUserId: str):
         raise
 
 
+def _remove_interested_item(provider_type: str, ID: int, cUserId: str):
+    """Roll back the 'already interested' marker when the provider update did not apply."""
+    interested_table, interested_table_name = _get_interested_table_for_provider(provider_type)
+    try:
+        interested_table.delete_item(Key={"ID": ID, "cUserId": cUserId})
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to roll back interested item in %s", interested_table_name)
+
+
 def lambda_handler(event, context):
     logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
 
@@ -110,13 +119,24 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("cUserId"))
+    if denied:
+        return denied
+
     provider_type = payload.get("providerType", "eat")
     table, table_name = _get_table_for_provider(provider_type)
 
-    zipcode = str(payload["zipcode"])
-    ID = int(payload["ID"])
-    interested = int(payload["interested"])
-    cUserId = str(payload["cUserId"])
+    try:
+        zipcode = str(payload["zipcode"])
+        ID = int(payload["ID"])
+        interested = int(payload["interested"])
+        cUserId = str(payload["cUserId"])
+    except (TypeError, ValueError):
+        return helpers._response(400, {"msg": "Invalid payload"})
+
+    if interested < 1:
+        return helpers._response(400, {"msg": "Invalid interested value"})
 
     # 1) Ensure row exists in appropriate *-interested table
     try:
@@ -126,9 +146,7 @@ def lambda_handler(event, context):
             500,
             {
                 "msg": "Failed to update interested table "
-                + " Interested Table for providerType: " + provider_type
-                + " Region: " + REGION_NAME
-            },
+                },
         )
 
     # If the row already existed, stop and tell the caller
@@ -141,7 +159,12 @@ def lambda_handler(event, context):
             }
         )
 
-    # 2) Update the provider table rating as before
+    # 2) Update the provider's interest counter, allowing only an increment of exactly one.
+    condition = "attribute_exists(zipcode) AND attribute_exists(ID) AND "
+    if interested == 1:
+        condition += "(attribute_not_exists(interested_by) OR interested_by = :prev)"
+    else:
+        condition += "interested_by = :prev"
     try:
         response = table.update_item(
             Key={
@@ -151,34 +174,27 @@ def lambda_handler(event, context):
             UpdateExpression="SET interested_by = :is",
             ExpressionAttributeValues={
                 ":is": interested,
+                ":prev": interested - 1,
             },
-            ConditionExpression="attribute_exists(zipcode) AND attribute_exists(ID)",
+            ConditionExpression=condition,
             ReturnValues="UPDATED_NEW",
         )
     except table.meta.client.exceptions.ConditionalCheckFailedException:
         logger.warning(
-            "Item not found in %s: zipcode=%s, ID=%s",
-            table_name,
-            zipcode,
-            ID
+            "Interest update rejected for %s: zipcode=%s, ID=%s, interested=%s",
+            table_name, zipcode, ID, interested,
         )
-        return helpers._response(404, {"msg": f"Item not found in {table_name}"})
+        _remove_interested_item(provider_type, ID, cUserId)
+        return helpers._response(409, {"msg": "Could not update interest; refresh and try again"})
     except (BotoCoreError, ClientError):
         logger.exception("Failed to update item in DynamoDB")
-        return helpers._response(
-            500,
-            {
-                "msg": "Failed to update provider rating"
-                       + " Table Name: " + table_name
-                       + " Region: " + REGION_NAME
-            },
-        )
+        _remove_interested_item(provider_type, ID, cUserId)
+        return helpers._response(500, {"msg": "Failed to update interest"})
 
     return helpers._response(
         200,
         {
             "message": "Rating updated",
             "providerType": provider_type,
-            "table": table_name,
         }
     )

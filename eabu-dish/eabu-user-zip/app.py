@@ -33,6 +33,11 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("userId"))
+    if denied:
+        return denied
+
     user_id = payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"])
     zipcode = str(payload["zipcode"])
 
@@ -51,10 +56,6 @@ def lambda_handler(event, context):
             500,
             {
                 "msg": "Failed to insert or update user zipcode"
-                + " Table Name: "
-                + table_name
-                + " Region: "
-                + region
             },
         )
 

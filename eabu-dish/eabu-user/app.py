@@ -1,4 +1,6 @@
 import json
+import os
+from my_utils import helpers
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -9,8 +11,12 @@ def lambda_handler(event, context):
     #bucket = query.get("bucket")
     #key = query.get("key")
     userid = event['pathParameters']['pUserId']
+
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
     key=userid+"/"+"selfie.jpg"
-    bucket="eabu-identity-pictures"
+    bucket = os.environ.get("IDENTITY_BUCKET_NAME", "eabu-identity-pictures")
 
     if not bucket or not key:
         return {
@@ -23,7 +29,7 @@ def lambda_handler(event, context):
         url = s3.generate_presigned_url(
             ClientMethod='get_object',
             Params={'Bucket': bucket, 'Key': key},
-            ExpiresIn=6000  # URL valid for 5 minutes
+            ExpiresIn=300  # URL valid for 5 minutes
         )
 
         return {
