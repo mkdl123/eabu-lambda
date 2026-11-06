@@ -1,5 +1,6 @@
 """Regression tests for the security fixes (run: python -m pytest tests/unit -v)."""
 import base64, importlib.util, io, json, os, sys
+from datetime import datetime, timezone
 os.environ.update(AUTH_MODE="off", AWS_ACCESS_KEY_ID="x", AWS_SECRET_ACCESS_KEY="x", AWS_DEFAULT_REGION="us-east-1")
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "eabu-dish/python"))
@@ -162,11 +163,18 @@ def test_auth():
     ur = load("eabu-update-ratings")
     rb = {"zipcode": "1", "ID": 5, "providerType": "eat", "totalstars": 5, "ratingscount": 1, "cUserId": "alice2"}
     check("[enforce] rating with someone else's cUserId -> 403", ur.lambda_handler(as_user(post(rb), "mallory"), None)["statusCode"] == 403)
+    check("[enforce] rating your own listing -> 409", ur.lambda_handler(as_user(post({**rb, "cUserId": "alice"}), "alice"), None)["statusCode"] == 409)
     check("[enforce] rating as yourself -> 200", ur.lambda_handler(as_user(post({**rb, "cUserId": "bob"}), "bob"), None)["statusCode"] == 200)
+    check("[enforce] owner can still be rated after a rejected self-rating",
+          prov.get_item(Key={"zipcode": "1", "ID": 5})["Item"]["ratingscount"] == 1)
 
     rp = load("consumer-repost")
     rpb = {"itemId": 7, "serviceCategory": "Eat", "zipcode": "1"}
     check("[enforce] repost of someone else's item rejected", rp.lambda_handler(as_user(post(rpb), "mallory"), None)["statusCode"] == 404)
+    ap = load("eabu-advertisement-post")
+    ad = {"address": "a", "name": "n", "email": "e@x.com", "phone": "1", "zipcode": "1", "title": "t", "subtitle": "s", "description": "d"}
+    check("[enforce] ad submission needs sign-in", ap.lambda_handler(post(ad), None)["statusCode"] == 401)
+
     check("[enforce] owner can repost", rp.lambda_handler(as_user(post(rpb), "alice"), None)["statusCode"] == 200)
 
     co = load("consumer-eat-offers")
@@ -210,4 +218,186 @@ def test_ads_require_review():
     ads.update_item(Key={"zipcode": "19060", "ID": stored["ID"]}, UpdateExpression="SET #s = :a",
                     ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":a": "active"})
     res = ag.lambda_handler({"headers": {}, "pathParameters": {"status": "active"}}, None)
-    check("admin-approved ad is listed", res["statusCode"] == 200 and json.loads(res["body"])["Count"] == 1)
+    body = json.loads(res["body"])
+    check("admin-approved ad is listed", res["statusCode"] == 200 and body["Count"] == 1)
+    check("public fields kept", body["Items"][0]["title"] == "t" and body["Items"][0]["url"] == "https://example.com/promo")
+    check("submitter contact details never listed",
+          not {"name", "email", "phone", "address"} & set(body["Items"][0]) and "e@x.com" not in res["body"])
+    check("no AWS response metadata leaked", "ResponseMetadata" not in body)
+    for hidden in ("draft", "rejected", "anything-else"):
+        check(f"unlisted status '{hidden}' -> 403",
+              ag.lambda_handler({"headers": {}, "pathParameters": {"status": hidden}}, None)["statusCode"] == 403)
+    os.environ["AD_PUBLIC_STATUSES"] = "live"
+    check("allowed statuses are configurable",
+          ag.lambda_handler({"headers": {}, "pathParameters": {"status": "LIVE"}}, None)["statusCode"] == 200)
+    del os.environ["AD_PUBLIC_STATUSES"]
+
+
+@mock_aws
+def test_get_user_only_finds_own_record():
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="eabu-identity", BillingMode="PAY_PER_REQUEST",
+        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("userId", "phone", "email")],
+        GlobalSecondaryIndexes=[{"IndexName": f"{a}-index", "KeySchema": [{"AttributeName": a, "KeyType": "HASH"}],
+                                 "Projection": {"ProjectionType": "ALL"}} for a in ("phone", "email")])
+    ident = boto3.resource("dynamodb", region_name="us-east-1").Table("eabu-identity")
+    ident.put_item(Item={"userId": "alice", "phone": "555", "email": "a@x.com"})
+    ident.put_item(Item={"userId": "bob", "phone": "555", "email": "b@x.com"})
+    gu = load("eabu-get-user")
+
+    def lookup(param, uid=None):
+        ev = {"pathParameters": {"param": param}}
+        return gu.lambda_handler(as_user(ev, uid) if uid else ev, None)
+
+    os.environ["AUTH_MODE"] = "enforce"
+    try:
+        check("[enforce] lookup needs sign-in", lookup("a@x.com")["statusCode"] == 401)
+        check("[enforce] own email found", json.loads(lookup("a@x.com", "alice")["body"])["userId"] == "alice")
+        check("[enforce] own phone found", json.loads(lookup("555", "alice")["body"])["userId"] == "alice")
+        check("[enforce] shared phone returns the caller, not the first match",
+              json.loads(lookup("555", "bob")["body"])["userId"] == "bob")
+        other, missing = lookup("a@x.com", "mallory"), lookup("nobody@x.com", "mallory")
+        check("[enforce] someone else's email looks the same as an unknown one",
+              (other["statusCode"], other["body"]) == (missing["statusCode"], missing["body"]))
+        check("[enforce] no userId revealed", "alice" not in other["body"])
+    finally:
+        os.environ["AUTH_MODE"] = "off"
+
+
+def mk_with_user_index(name):
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName=name, BillingMode="PAY_PER_REQUEST",
+        KeySchema=[{"AttributeName": "zipcode", "KeyType": "HASH"}, {"AttributeName": "ID", "KeyType": "RANGE"}],
+        AttributeDefinitions=[{"AttributeName": "zipcode", "AttributeType": "S"}, {"AttributeName": "ID", "AttributeType": "N"},
+                              {"AttributeName": "userId", "AttributeType": "S"}],
+        GlobalSecondaryIndexes=[{"IndexName": "userId-index", "KeySchema": [{"AttributeName": "userId", "KeyType": "HASH"}],
+                                 "Projection": {"ProjectionType": "ALL"}}])
+    return boto3.resource("dynamodb", region_name="us-east-1").Table(name)
+
+
+@mock_aws
+def test_browsing_consumer_requests():
+    now = datetime.now(timezone.utc).isoformat()
+    for cat in ("eat", "live", "move"):
+        mk_with_user_index(f"eabu-{cat}-consumer").put_item(Item={
+            "zipcode": "19060", "ID": 101, "userId": "alice", "title": "t", "createdAt": now,
+            "latitude": "39.8512345", "longitude": "-75.4312345"})
+        pg = load(f"provider-get-{cat}")
+
+        def get(user_path, caller=None):
+            ev = {"pathParameters": {"zip": "19060", "userId": user_path}}
+            return pg.lambda_handler(as_user(ev, caller) if caller else ev, None)
+
+        os.environ["AUTH_MODE"] = "enforce"
+        try:
+            check(f"[enforce] {cat}: anonymous browsing -> 401", get("NA")["statusCode"] == 401)
+            res = get("NA", "bob")
+            item = json.loads(res["body"])["Items"][0]
+            check(f"{cat}: others see the area only", (item["latitude"], item["longitude"]) == ("39.85", "-75.43"))
+            check(f"{cat}: exact location not in the response", "39.8512345" not in res["body"])
+            check(f"{cat}: no AWS metadata", "ResponseMetadata" not in res["body"])
+            check(f"{cat}: userId kept so an offer can be made", item["userId"] == "alice")
+            own = json.loads(get("alice", "alice")["body"])["Items"][0]
+            check(f"{cat}: owner keeps the exact location", own["latitude"] == "39.8512345")
+            check(f"[enforce] {cat}: someone else's list -> 403", get("alice", "bob")["statusCode"] == 403)
+        finally:
+            os.environ["AUTH_MODE"] = "off"
+
+
+@mock_aws
+def test_offers_need_a_real_request():
+    ddb = boto3.resource("dynamodb", region_name="us-east-1")
+    offer = {"itemId": 101, "userId": "alice", "pUserId": "bob", "title": "t", "description": "d", "offerDescription": "o",
+             "phoneNumber": "1", "email": "b@x.com", "price": "10", "zip": "19060", "latitude": 39.85, "longitude": "-75.43"}
+    for cat in ("eat", "live", "move"):
+        mk_with_user_index(f"eabu-{cat}-consumer").put_item(Item={"zipcode": "19060", "ID": 101, "userId": "alice"})
+        offers = mk(ddb, f"eabu-{cat}-offer", "zipcode", "S", "ID", "N")
+        m = load(f"provider-offer-{cat}")
+
+        def send(**changes):
+            return m.lambda_handler(post({**offer, **changes}), None)["statusCode"]
+
+        check(f"{cat}: real offer accepted", send() == 200)
+        check(f"{cat}: nonexistent item -> 404", send(itemId=999) == 404)
+        check(f"{cat}: item of a different consumer -> 404", send(userId="carol") == 404)
+        check(f"{cat}: non-numeric itemId -> 400 not crash", send(itemId="abc") == 400)
+        check(f"{cat}: decimal price -> 400 not crash", send(price=9.5) == 400)
+        check(f"{cat}: oversized offer -> 400", send(offerDescription="x" * 5001) == 400)
+        missing = {k: v for k, v in offer.items() if k != "zip"}
+        check(f"{cat}: missing zip -> 400 not crash", m.lambda_handler(post(missing), None)["statusCode"] == 400)
+        check(f"{cat}: rejected offers are not stored or counted",
+              [i["ID"] for i in offers.scan()["Items"] if i["ID"] != 100] == [1])
+
+
+@mock_aws
+def test_input_limits():
+    ddb = boto3.resource("dynamodb", region_name="us-east-1")
+    mk(ddb, "eabu-eat-provider", "zipcode", "S", "ID", "N")
+    feedback_table = mk(ddb, "eabu-feedback", "ID", "N")
+    listing = {"zipcode": "1", "title": "t", "description": "d", "phone": "1", "userId": "a", "latitude": 39.85, "longitude": -75.43}
+    pp = load("provider-post-eat")
+    check("coordinates may be decimal numbers", pp.lambda_handler(post(listing), None)["statusCode"] == 200)
+    check("whole-number phone still accepted", pp.lambda_handler(post({**listing, "phone": 6105550100}), None)["statusCode"] == 200)
+    check("oversized title -> 400", pp.lambda_handler(post({**listing, "title": "x" * 201}), None)["statusCode"] == 400)
+    check("list as title -> 400", pp.lambda_handler(post({**listing, "title": ["x"]}), None)["statusCode"] == 400)
+    for body in ("[1]", "5", '"zipcode title description phone"'):
+        check(f"non-object body {body} -> 400", pp.lambda_handler({"httpMethod": "POST", "body": body}, None)["statusCode"] == 400)
+
+    fb = load("eabu-feedback-submit")
+    check("normal feedback saved", fb.lambda_handler(post({"feedback": "x" * 2000}), None)["statusCode"] == 200)
+    check("oversized feedback -> 400", fb.lambda_handler(post({"feedback": "x" * 2001}), None)["statusCode"] == 400)
+    check("oversized email -> 400", fb.lambda_handler(post({"feedback": "x", "email": "e" * 255}), None)["statusCode"] == 400)
+    check("non-object feedback -> 400 not crash", fb.lambda_handler({"httpMethod": "POST", "body": "[1]"}, None)["statusCode"] == 400)
+    check("only the valid feedback was stored", feedback_table.scan()["Count"] == 1)
+
+    ap = load("eabu-advertisement-post")
+    ad = {"address": "a", "name": "n", "email": "e@x.com", "phone": "1", "zipcode": "1", "title": "t", "subtitle": "s", "description": "d"}
+    check("oversized ad url -> 400", ap.lambda_handler(post({**ad, "url": "https://x.co/" + "a" * 2048}), None)["statusCode"] == 400)
+
+
+@mock_aws
+def test_identity_response_hides_bucket():
+    mk(boto3.resource("dynamodb", region_name="us-east-1"), "eabu-identity", "userId", "S")
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="eabu-identity-pictures")
+    img = jpeg_b64()
+    res = load("eabu-identity").lambda_handler(post({"user_id": "u1", "selfie": img, "license_front": img, "license_back": img,
+                                                     "address": "a", "full_name": "n", "email": "e@x.com", "phone": "1"}), None)
+    check("upload ok, bucket name not returned", res["statusCode"] == 200 and "eabu-identity-pictures" not in res["body"])
+
+
+@mock_aws
+def test_move_request_is_stored_and_owner_checked():
+    t = mk(boto3.resource("dynamodb", region_name="us-east-1"), "eabu-move-consumer", "zipcode", "S", "ID", "N")
+    m = load("consumer-post-move")
+    body = {"zipcode": "1", "title": "t", "description": "d", "userId": "alice", "latitude": 1.5, "longitude": 2.5}
+    os.environ["AUTH_MODE"] = "enforce"
+    try:
+        check("[enforce] posting as someone else -> 403", m.lambda_handler(as_user(post(body), "mallory"), None)["statusCode"] == 403)
+        res = m.lambda_handler(as_user(post(body), "alice"), None)
+        check("request stored", res["statusCode"] == 200 and t.get_item(Key={"zipcode": "1", "ID": 1})["Item"]["userId"] == "alice")
+    finally:
+        os.environ["AUTH_MODE"] = "off"
+
+
+def test_auth_fails_closed_when_mode_is_missing():
+    helpers = load("eabu-user").helpers
+    del os.environ["AUTH_MODE"]
+    try:
+        check("missing AUTH_MODE means enforce", helpers.auth_enforced())
+    finally:
+        os.environ["AUTH_MODE"] = "off"
+
+
+CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-identity", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
+    name.format(c) for c in ("eat", "live", "move")
+    for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")]
+
+
+@mock_aws
+def test_browser_clients_keep_cors_header():
+    # No tables exist, so most of these take their error path: that response needs the header too.
+    params = {k: "1" for k in ("zip", "userId", "itemId", "pUserId", "param", "status")}
+    for name in CORS_FUNCTIONS:
+        res = load(name).lambda_handler({"pathParameters": params, "httpMethod": "GET"}, None)
+        check(f"{name} sends the CORS header", res["headers"]["Access-Control-Allow-Origin"] == "*")

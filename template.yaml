@@ -55,12 +55,24 @@ Globals:
           Ref: NotificationFunctionArn
         AUTH_MODE:
           Ref: AuthMode
+        AD_PUBLIC_STATUSES:
+          Ref: AdPublicStatuses
         EAT_RATED_TABLE_NAME:
           Ref: EatRatedTableName
         LIVE_RATED_TABLE_NAME:
           Ref: LiveRatedTableName
         MOVE_RATED_TABLE_NAME:
           Ref: MoveRatedTableName
+        LIFESTYLE_CONSUMER_TABLE_NAME:
+          Ref: LifestyleConsumerTableName
+        LIFESTYLE_PROVIDER_TABLE_NAME:
+          Ref: LifestyleProviderTableName
+        LIFESTYLE_OFFER_TABLE_NAME:
+          Ref: LifestyleOfferTableName
+        LIFESTYLE_INTERESTED_TABLE_NAME:
+          Ref: LifestyleInterestedTableName
+        LIFESTYLE_RATED_TABLE_NAME:
+          Ref: LifestyleRatedTableName
         IDENTITY_BUCKET_NAME:
           Ref: IdentityBucketName
         SENDER_EMAIL:
@@ -81,14 +93,14 @@ Parameters:
       "off" logs requests that would be rejected (rollout mode); "enforce" rejects
       requests without a valid Cognito identity matching the userId they act on.
       Requires a Cognito authorizer on the API Gateway methods.
+  AdPublicStatuses:
+    Type: String
+    Default: active,approved,published
+    Description: Comma-separated ad statuses that may be listed publicly (case-insensitive).
   AuthUserIdClaim:
     Type: String
     Default: sub
     Description: Cognito claim that holds the app's userId (usually "sub" or "cognito:username").
-  xApiKey:
-    Type: String
-    NoEcho: true
-
   NotificationFunctionName:
     Type: String
     Default: EabuNotificationFunction
@@ -173,6 +185,21 @@ Parameters:
   MoveRatedTableName:
     Type: String
     Default: eabu-move-rated
+  LifestyleConsumerTableName:
+    Type: String
+    Default: eabu-lifestyle-consumer
+  LifestyleProviderTableName:
+    Type: String
+    Default: eabu-lifestyle-provider
+  LifestyleOfferTableName:
+    Type: String
+    Default: eabu-lifestyle-offer
+  LifestyleInterestedTableName:
+    Type: String
+    Default: eabu-lifestyle-interested
+  LifestyleRatedTableName:
+    Type: String
+    Default: eabu-lifestyle-rated
   IdentityBucketName:
     Type: String
     Default: eabu-identity-pictures
@@ -246,6 +273,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
   EabuServiceRequestFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -274,6 +302,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
 
   EabuUserZipcodeFunctionName:
@@ -318,6 +347,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatInterestedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveInterestedTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleInterestedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveInterestedTableName}'
 
   EabuPostUserInterestedFunctionName:
@@ -335,6 +365,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatInterestedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveInterestedTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleInterestedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveInterestedTableName}'
             - Effect: Allow
               Action:
@@ -342,6 +373,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
 
   EabuGetUserRatingsFunctionName:
@@ -359,7 +391,9 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/*'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/*'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/*'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/*'
 
@@ -378,6 +412,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatRatedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveRatedTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleRatedTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveRatedTableName}'
             - Effect: Allow
               Action:
@@ -385,6 +420,7 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
   EabuUserFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -509,7 +545,15 @@ Resources:
     Properties:
       CodeUri: eabu-dish/consumer-post-move
       Handler: app.lambda_handler
-      # No AWS service access needed (role keeps only CloudWatch Logs).
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
 
   ConsumerPostLiveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -600,13 +644,31 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatOfferTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}/index/*'
 
   LiveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: eabu-dish/provider-offer-live
       Handler: app.lambda_handler
-      # No AWS service access needed (role keeps only CloudWatch Logs).
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveOfferTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}/index/*'
 
   MoveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -622,6 +684,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveOfferTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}/index/*'
 
   ConsumerReceivedMoveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -791,3 +858,113 @@ Resources:
               Condition:
                 StringEquals:
                   ses:FromAddress: !Ref SenderEmail
+
+  ProviderGetLifestyleFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-get-lifestyle
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}/index/*'
+
+  ProviderPostLifestyleFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-post-lifestyle
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+
+  ConsumerPostLifestyleFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-post-lifestyle
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
+
+  ConsumerGetLifestyleFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-get-lifestyle
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/*'
+
+  LifestyleOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-offer-lifestyle
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleOfferTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}/index/*'
+
+  ConsumerReceivedLifestyleOfferFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/consumer-lifestyle-offers
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleOfferTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleOfferTableName}/index/*'
+
+  ProviderMyLifestyleServicesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eabu-dish/provider-my-lifestyle-services
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/*'

@@ -16,11 +16,13 @@ REQUIRED_FIELDS = ["zipcode", "ID", "totalstars", "ratingscount", "providerType"
 EAT_PROVIDER_TABLE_NAME = os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider")
 LIVE_PROVIDER_TABLE_NAME = os.environ.get("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider")
 MOVE_PROVIDER_TABLE_NAME = os.environ.get("MOVE_PROVIDER_TABLE_NAME", "eabu-move-provider")
+LIFESTYLE_PROVIDER_TABLE_NAME = os.environ.get("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider")
 
 # New: rated tables
 EAT_RATED_TABLE_NAME = os.environ.get("EAT_RATED_TABLE_NAME", "eabu-eat-rated")
 LIVE_RATED_TABLE_NAME = os.environ.get("LIVE_RATED_TABLE_NAME", "eabu-live-rated")
 MOVE_RATED_TABLE_NAME = os.environ.get("MOVE_RATED_TABLE_NAME", "eabu-move-rated")
+LIFESTYLE_RATED_TABLE_NAME = os.environ.get("LIFESTYLE_RATED_TABLE_NAME", "eabu-lifestyle-rated")
 
 REGION_NAME = os.environ.get("REGION_NAME", "us-east-1")
 
@@ -29,10 +31,12 @@ dynamodb = boto3.resource("dynamodb", region_name=REGION_NAME)
 eat_table = dynamodb.Table(EAT_PROVIDER_TABLE_NAME)
 live_table = dynamodb.Table(LIVE_PROVIDER_TABLE_NAME)
 move_table = dynamodb.Table(MOVE_PROVIDER_TABLE_NAME)
+lifestyle_table = dynamodb.Table(LIFESTYLE_PROVIDER_TABLE_NAME)
 
 eat_rated_table = dynamodb.Table(EAT_RATED_TABLE_NAME)
 live_rated_table = dynamodb.Table(LIVE_RATED_TABLE_NAME)
 move_rated_table = dynamodb.Table(MOVE_RATED_TABLE_NAME)
+lifestyle_rated_table = dynamodb.Table(LIFESTYLE_RATED_TABLE_NAME)
 
 lambda_client = boto3.client("lambda", region_name=REGION_NAME)
 
@@ -44,6 +48,8 @@ def _get_table_for_provider(provider_type: str):
         return live_table, LIVE_PROVIDER_TABLE_NAME
     if normalized == "move":
         return move_table, MOVE_PROVIDER_TABLE_NAME
+    if normalized == "lifestyle":
+        return lifestyle_table, LIFESTYLE_PROVIDER_TABLE_NAME
     # default / "eat"
     return eat_table, EAT_PROVIDER_TABLE_NAME
 
@@ -55,6 +61,8 @@ def _get_rated_table_for_provider(provider_type: str):
         return live_rated_table, LIVE_RATED_TABLE_NAME
     if normalized == "move":
         return move_rated_table, MOVE_RATED_TABLE_NAME
+    if normalized == "lifestyle":
+        return lifestyle_rated_table, LIFESTYLE_RATED_TABLE_NAME
     # default / "eat"
     return eat_rated_table, EAT_RATED_TABLE_NAME
 
@@ -176,6 +184,8 @@ def lambda_handler(event, context):
             "AND ratingscount = :prev_rc "
             "AND totalstars >= :min_prev_ts AND totalstars <= :max_prev_ts"
         )
+    # Owners may not rate their own listing.
+    condition += " AND (attribute_not_exists(userId) OR userId <> :rater)"
     try:
         response = table.update_item(
             Key={
@@ -189,6 +199,7 @@ def lambda_handler(event, context):
                 ":prev_rc": ratingscount - 1,
                 ":min_prev_ts": totalstars - 5,
                 ":max_prev_ts": totalstars - 1,
+                ":rater": cUserId,
             },
             ConditionExpression=condition,
             ReturnValues="UPDATED_NEW",

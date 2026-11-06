@@ -3,6 +3,7 @@ import logging
 import os
 from decimal import Decimal
 
+from my_utils import helpers
 import boto3
 from datetime import datetime
 
@@ -11,7 +12,15 @@ from boto3.dynamodb.conditions import Key
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-NON_PUBLIC_STATUSES = {"pending", "rejected"}
+# Only these fields are public. The submitter's name, email, phone and address never are.
+PUBLIC_AD_FIELDS = ("ID", "zipcode", "status", "country", "title", "subtitle", "url", "description", "createdAt")
+
+
+def _public_statuses():
+    """Statuses that may be listed publicly (AD_PUBLIC_STATUSES, comma separated)."""
+    raw = os.environ.get("AD_PUBLIC_STATUSES", "active,approved,published")
+    return {s.strip().lower() for s in raw.split(",") if s.strip()}
+
 
 SUBMIT_URL = "https://www.eabu.net/feedback/submit"
 
@@ -193,6 +202,7 @@ def decimal_serializer(obj):
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj).__name__))
 
 
+@helpers.cors
 def lambda_handler(event, context):
     current_timestamp = datetime.now().isoformat()
 
@@ -212,9 +222,8 @@ def lambda_handler(event, context):
     table = post_table.Table(table_name)
     status = event['pathParameters']['status']
 
-    # Pending/rejected ad requests hold submitters' private contact details and
-    # unreviewed content; only published statuses may be listed publicly.
-    if str(status).strip().lower() in NON_PUBLIC_STATUSES:
+    # Anything not explicitly published (pending, rejected, drafts...) stays private.
+    if str(status).strip().lower() not in _public_statuses():
         return {
             'statusCode': 403,
             'body': json.dumps({'msg': 'Forbidden'})
@@ -226,9 +235,10 @@ def lambda_handler(event, context):
             KeyConditionExpression=Key('status').eq(status)
         )
 
+        items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in response.get('Items', [])]
         return {
             'statusCode': 200,
-            'body': json.dumps(response, default=decimal_serializer)
+            'body': json.dumps({'Items': items, 'Count': len(items)}, default=decimal_serializer)
         }
 
     except Exception as e:
@@ -238,21 +248,3 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': 'Error retrieving item'
         }
-
-
-def validate_api_key(api_key):
-    """
-    Additional API key validation logic
-    You can implement custom validation here
-    """
-    # Example: Check against a list of valid keys stored in environment variables
-    valid_keys = os.environ.get('X_API_KEY', '').split(',')
-
-    # Example: Check key format
-    if len(api_key) < 20:
-        return False
-
-    # Example: Check against database or external service
-    # return check_api_key_in_database(api_key)
-
-    return True  # API Gateway already validated the key

@@ -1,13 +1,25 @@
 import os
 import json
 import base64
+import functools
 import logging
 from datetime import datetime, timezone
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Longest value accepted for each client-supplied field.
+FIELD_LIMITS = {
+    "zipcode": 10, "zip": 10, "userId": 128, "pUserId": 128, "cUserId": 128,
+    "title": 200, "description": 5000, "offerDescription": 5000, "message": 5000,
+    "phone": 32, "phoneNumber": 32, "email": 254, "price": 32, "serviceType": 100,
+    "latitude": 32, "longitude": 32,
+}
+COORDINATE_FIELDS = ("latitude", "longitude")
+MAX_NUMBER_LENGTH = 32  # DynamoDB numbers hold 38 digits at most
 
 def _parse_body(event) -> dict:
     body = event.get("body")
@@ -19,19 +31,33 @@ def _parse_body(event) -> dict:
 
     if isinstance(body, str):
         try:
-            return json.loads(body)
+            body = json.loads(body)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON body: {e}") from e
 
     if isinstance(body, dict):
         return body
 
-    raise ValueError("Unsupported body type")
+    raise ValueError("Request body must be a JSON object")
 
 def _validate_payload(payload: dict, REQUIRED_FIELDS):
     missing = [k for k in REQUIRED_FIELDS if k not in payload]
     if missing:
         raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+    _validate_fields(payload)
+
+
+def _validate_fields(payload: dict):
+    """Reject values that are too long, or of a type DynamoDB can't store (floats, lists...)."""
+    for field, limit in FIELD_LIMITS.items():
+        value = payload.get(field)
+        if value is None:
+            continue
+        allowed = (str, int, float) if field in COORDINATE_FIELDS else (str, int)
+        if isinstance(value, bool) or not isinstance(value, allowed):
+            raise ValueError(f"{field} has an invalid type")
+        if len(str(value)) > (limit if isinstance(value, str) else MAX_NUMBER_LENGTH):
+            raise ValueError(f"{field} is too long (max {limit} characters)")
 
 
 def _response(status: int, body: dict):
@@ -44,6 +70,16 @@ def _response(status: int, body: dict):
         "body": json.dumps(body),
     }
 
+def cors(handler):
+    """Add the CORS header to every response of a handler that builds its own responses."""
+    @functools.wraps(handler)
+    def wrapper(event, context):
+        response = handler(event, context)
+        response.setdefault("headers", {}).setdefault("Access-Control-Allow-Origin", "*")
+        return response
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # Authentication / authorization
 #
@@ -53,15 +89,15 @@ def _response(status: int, body: dict):
 # arrives in the body, path or query string without comparing it to this.
 #
 # AUTH_MODE:
-#   "off"     - (default) allow requests as before, but log every request that
+#   "off"     - allow requests as before, but log every request that
 #               WOULD be rejected. Use this while rolling the authorizer out.
-#   "enforce" - reject unauthenticated (401) and mismatched (403) requests.
+#   "enforce" - (default if unset) reject unauthenticated (401) and mismatched (403) requests.
 # AUTH_USER_ID_CLAIM: which Cognito claim equals the app's userId ("sub" by
 #   default; use "cognito:username" if the app stores the username).
 # ---------------------------------------------------------------------------
 
 def auth_enforced() -> bool:
-    return os.environ.get("AUTH_MODE", "off").strip().lower() == "enforce"
+    return os.environ.get("AUTH_MODE", "enforce").strip().lower() == "enforce"
 
 
 def get_caller_id(event):
@@ -109,6 +145,34 @@ def is_owner(event, user_id) -> bool:
     if caller is not None and user_id is not None and str(user_id) == caller:
         return True
     return not auth_enforced()
+
+
+def query_result(response: dict) -> dict:
+    """A DynamoDB query response without the AWS metadata, safe to return to clients."""
+    return {k: v for k, v in response.items() if k != "ResponseMetadata"}
+
+
+def coarsen_location(items, places=2):
+    """Round coordinates in place (2 places is about 1 km) so a listing can't pinpoint a home."""
+    for item in items:
+        for field in COORDINATE_FIELDS:
+            if field in item:
+                try:
+                    item[field] = str(round(float(item[field]), places))
+                except (TypeError, ValueError):
+                    del item[field]
+
+
+def user_has_item(table, user_id: str, item_id: int) -> bool:
+    """True if item_id is one of user_id's items, found through the table's userId-index."""
+    kwargs = {"IndexName": "userId-index", "KeyConditionExpression": Key("userId").eq(user_id)}
+    while True:
+        response = table.query(**kwargs)
+        if any(int(i["ID"]) == item_id for i in response.get("Items", [])):
+            return True
+        if "LastEvaluatedKey" not in response:
+            return False
+        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
 def increment_counter(partition_key, table, counter_attribute='total_count'):

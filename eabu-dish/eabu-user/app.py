@@ -6,6 +6,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 s3 = boto3.client("s3")
 
+@helpers.cors
 def lambda_handler(event, context):
     #query = event.get("queryStringParameters") or {}
     #bucket = query.get("bucket")

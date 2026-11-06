@@ -14,6 +14,7 @@ table_name = os.environ.get('EABU_IDENTITY_TABLE_NAME', 'eabu-identity')
 dynamodb = boto3.resource("dynamodb", region_name=region)
 table = dynamodb.Table(table_name)
 
+@helpers.cors
 def lambda_handler(event, context):
     param = str(event['pathParameters']['param'])
 
@@ -39,7 +40,9 @@ def lambda_handler(event, context):
             IndexName=index_name,
             KeyConditionExpression=Key(search_attr).eq(param)
         )
-        items = response.get('Items', [])
+        # Callers may only look up their own record. Someone else's match gets the
+        # same "User not found" as no match, so this can't reveal who is registered.
+        items = [i for i in response.get('Items', []) if helpers.is_owner(event, i.get('userId'))]
 
         if items:
             # Return the userId found in the first matching record

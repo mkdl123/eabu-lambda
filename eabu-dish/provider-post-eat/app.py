@@ -11,7 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-REQUIRED_FIELDS = ["zipcode", "title", "description","phone"]
+REQUIRED_FIELDS = ["zipcode", "title", "description", "phone", "userId", "latitude", "longitude"]
 
 
 # Resolve environment configuration

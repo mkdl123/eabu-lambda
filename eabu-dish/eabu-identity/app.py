@@ -98,7 +98,7 @@ def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
         raise ValueError("Image could not be processed")
 
 def upload_to_s3(image_data: bytes, user_id: str, image_type: str, timestamp: str) -> str:
-    """Upload image to S3 and return the URL"""
+    """Upload image to S3 and return its key"""
     try:
         #s3_key = f"users/{user_id}/{timestamp}/{image_type}.jpg"
         s3_key = f"{user_id}/{image_type}.jpg"
@@ -109,11 +109,12 @@ def upload_to_s3(image_data: bytes, user_id: str, image_type: str, timestamp: st
             ContentType='image/jpeg'
         )
         
-        return f"s3://{BUCKET_NAME}/{s3_key}"
+        return s3_key
     except Exception as e:
         logger.error("Failed to upload %s: %s", image_type, e)
         raise Exception(f"Failed to upload {image_type}")
 
+@helpers.cors
 def lambda_handler(event, context):
     try:
         # Parse JSON body

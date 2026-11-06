@@ -25,6 +25,7 @@ def decimal_serializer(obj):
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj).__name__))
 
 
+@helpers.cors
 def lambda_handler(event, context):
     current_timestamp = datetime.now().isoformat()
 
@@ -51,10 +52,10 @@ def lambda_handler(event, context):
     # id = event['pathParameters']['id']
     userid = event['pathParameters']['userId']
 
-    if userid != "NA":
-        denied = helpers.authorize_user(event, userid)
-        if denied:
-            return denied
+    # Browsing a zipcode needs sign-in; a specific user's list is only for that user.
+    denied = helpers.require_authenticated(event) if userid == "NA" else helpers.authorize_user(event, userid)
+    if denied:
+        return denied
     # print("Parameter id: ",id);
     print("Parameter userid: ", userid);
     # last 30 days including today (UTC) -> now - 29 days
@@ -78,9 +79,13 @@ def lambda_handler(event, context):
 
 
 
+        if userid == "NA":
+            # Other people's requests: show the area, not the exact address.
+            helpers.coarsen_location(response.get("Items", []))
+
         return {
             'statusCode': 200,
-            'body': json.dumps(response, default=decimal_serializer)
+            'body': json.dumps(helpers.query_result(response), default=decimal_serializer)
         }
 
 

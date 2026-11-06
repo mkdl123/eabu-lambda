@@ -16,6 +16,7 @@ REQUIRED_FIELDS = ["itemId", "serviceCategory", "zipcode"]
 EAT_CONSUMER_TABLE_NAME = "eabu-eat-consumer"
 LIVE_CONSUMER_TABLE_NAME = "eabu-live-consumer"
 MOVE_CONSUMER_TABLE_NAME = "eabu-move-consumer"
+LIFESTYLE_CONSUMER_TABLE_NAME = "eabu-lifestyle-consumer"
 
 # Existing index (if you still use it elsewhere)
 ITEM_ID_INDEX_NAME = "itemId-index"
@@ -29,6 +30,8 @@ def _resolve_table_name(service_category: str) -> str:
         return os.environ.get("EAT_CONSUMER_TABLE_NAME", EAT_CONSUMER_TABLE_NAME)
     if service_category == "Live":
         return os.environ.get("LIVE_CONSUMER_TABLE_NAME", LIVE_CONSUMER_TABLE_NAME)
+    if service_category == "Lifestyle":
+        return os.environ.get("LIFESTYLE_CONSUMER_TABLE_NAME", LIFESTYLE_CONSUMER_TABLE_NAME)
     return os.environ.get("MOVE_CONSUMER_TABLE_NAME", MOVE_CONSUMER_TABLE_NAME)
 
 

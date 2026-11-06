@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Eabu is a local services connector platform (AWS SAM / Python 3.12) that lets consumers post service requests and providers respond across three categories: **Eat** (food), **Live** (household help), and **Move** (transportation). The entire backend is deployed as individual AWS Lambda functions fronted by API Gateway, with DynamoDB as the datastore.
+Eabu is a local services connector platform (AWS SAM / Python 3.12) that lets consumers post service requests and providers respond across four categories: **Eat** (food), **Live** (household help), **Move** (transportation), and **Lifestyle** (fitness, wellness, beauty). The entire backend is deployed as individual AWS Lambda functions fronted by API Gateway, with DynamoDB as the datastore.
 
 ## Commands
 
@@ -73,11 +73,18 @@ Every writable table stores a sentinel counter row at `{ID: 100, zipcode: '11111
 | `EAT_OFFER_TABLE_NAME` | `eabu-eat-offer` | Provider offers to eat consumers |
 | `LIVE_OFFER_TABLE_NAME` | `eabu-live-offer` | Provider offers to live consumers |
 | `MOVE_OFFER_TABLE_NAME` | `eabu-move-offer` | Provider offers to move consumers |
+| `LIFESTYLE_{CONSUMER,PROVIDER,OFFER,INTERESTED,RATED}_TABLE_NAME` | `eabu-lifestyle-*` | Lifestyle requests, services, offers, interest and ratings |
 | `EABU_USER_TABLE_NAME` | `eabu-users` | User profiles |
 | `EABU_IDENTITY_TABLE_NAME` | `eabu-identity` | Identity verification records |
 | `FOLLOWERS_TABLE_NAME` | `eabu-followers` | Follow relationships (pUserId → cEmail) |
 | `EAT/LIVE/MOVE_INTERESTED_TABLE_NAME` | `eabu-*-interested` | Interest/bookmark records |
 | `EABU_FEEDBACK_TABLE_NAME` | `eabu-feedback` | User feedback submissions |
+
+Tables are created outside the SAM stack (for Lifestyle: `scripts/create-lifestyle-tables.sh`).
+
+### API Gateway
+
+The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new route needs setting up there as well as its function (for Lifestyle: `scripts/create-lifestyle-routes.sh`).
 
 ### S3
 
@@ -90,13 +97,13 @@ Every writable table stores a sentinel counter row at `{ID: 100, zipcode: '11111
 ### Function naming conventions
 
 Functions follow a `{role}-{action}-{category}` pattern:
-- `provider-post-{eat|live|move}` — provider creates a service listing
-- `provider-get-{eat|live|move}` — provider retrieves their listings
-- `provider-offer-{eat|live|move}` — provider submits an offer in response to a consumer request
-- `provider-my-{eat|live|move}-services` — provider views their own active services
-- `consumer-post-{eat|live|move}` — consumer posts a service request
-- `consumer-get-{eat|live|move}` — consumer browses available services by zipcode
-- `consumer-{eat|live|move}-offers` — consumer views offers received
+- `provider-post-{eat|live|move|lifestyle}` — provider creates a service listing
+- `provider-get-{eat|live|move|lifestyle}` — provider retrieves their listings
+- `provider-offer-{eat|live|move|lifestyle}` — provider submits an offer in response to a consumer request
+- `provider-my-{eat|live|move|lifestyle}-services` — provider views their own active services
+- `consumer-post-{eat|live|move|lifestyle}` — consumer posts a service request
+- `consumer-get-{eat|live|move|lifestyle}` — consumer browses available services by zipcode
+- `consumer-{eat|live|move|lifestyle}-offers` — consumer views offers received
 
 ### Security conventions
 

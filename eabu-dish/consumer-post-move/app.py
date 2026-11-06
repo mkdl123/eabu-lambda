@@ -1,131 +1,69 @@
+
+import os
+import json
+import base64
 import logging
+from datetime import datetime, timezone
+from my_utils import helpers
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-SUBMIT_URL = "https://www.eabu.net/feedback/submit"
+REQUIRED_FIELDS = ["zipcode", "title", "description", "userId", "latitude", "longitude"]
 
-HTML_PAGE = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Feedback</title>
-  <style>
-    :root {{ color-scheme: light; }}
-    body {{
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: #f6f7fb; color: #111827;
-    }}
-    .wrap {{ min-height: 100vh; display: grid; place-items: center; padding: 24px; }}
-    .card {{
-      width: min(560px, 100%); background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
-      box-shadow: 0 10px 30px rgba(17,24,39,.08); padding: 18px 18px 14px;
-    }}
-    h1 {{ font-size: 16px; margin: 0 0 10px; font-weight: 650; }}
-    p  {{ margin: 0 0 14px; color: #4b5563; font-size: 13px; line-height: 1.4; }}
-    textarea {{
-      width: 100%; min-height: 120px; resize: vertical; padding: 12px 12px;
-      border-radius: 12px; border: 1px solid #d1d5db; outline: none; font-size: 14px;
-    }}
-    textarea:focus {{ border-color: #6366f1; box-shadow: 0 0 0 4px rgba(99,102,241,.15); }}
-    .row {{ display: flex; gap: 10px; align-items: center; margin-top: 12px; }}
-    button {{
-      border: 0; border-radius: 12px; padding: 10px 12px; font-weight: 650;
-      background: #111827; color: #fff; cursor: pointer;
-    }}
-    button:disabled {{ opacity: .6; cursor: not-allowed; }}
-    .status {{ font-size: 13px; color: #4b5563; }}
-    .status.ok {{ color: #166534; }}
-    .status.err {{ color: #991b1b; }}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <form class="card" id="feedbackForm" novalidate>
-      <h1>Send feedback</h1>
-      <p>Tell us what worked well and what we can improve.</p>
 
-      <textarea
-        id="feedback"
-        name="feedback"
-        maxlength="2000"
-        placeholder="Write your feedback…"
-        required
-      ></textarea>
+# Resolve environment configuration
+table_name = os.environ.get("MOVE_CONSUMER_TABLE_NAME", "eabu-move-consumer")
+region = os.environ.get("REGION_NAME", "us-east-1")
+# Initialize AWS resources (reuse across invocations if desired)
+dynamodb = boto3.resource("dynamodb", region_name=region)
+table = dynamodb.Table(table_name)
 
-      <div class="row">
-        <button id="submitBtn" type="submit">Submit</button>
-        <span id="status" class="status" aria-live="polite"></span>
-      </div>
-    </form>
-  </div>
 
-  <script>
-    const ENDPOINT_URL = {SUBMIT_URL!r};
-
-    const form = document.getElementById("feedbackForm");
-    const textarea = document.getElementById("feedback");
-    const btn = document.getElementById("submitBtn");
-    const statusEl = document.getElementById("status");
-
-    function setStatus(msg, kind) {{
-      statusEl.textContent = msg || "";
-      statusEl.className = "status" + (kind ? " " + kind : "");
-    }}
-
-    form.addEventListener("submit", async (e) => {{
-      e.preventDefault();
-
-      const feedback = textarea.value.trim();
-      if (!feedback) {{
-        setStatus("Please enter feedback.", "err");
-        textarea.focus();
-        return;
-      }}
-
-      btn.disabled = true;
-      setStatus("Sending…");
-
-      try {{
-        const res = await fetch(ENDPOINT_URL, {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify({{ feedback }})
-        }});
-
-        const data = await res.json().catch(() => ({{}}));
-
-        if (!res.ok) {{
-          setStatus((data && data.msg) || "Failed to send feedback.", "err");
-          return;
-        }}
-
-        textarea.value = "";
-        setStatus("Thanks! Your feedback was sent.", "ok");
-      }} catch {{
-        setStatus("Network error. Please try again.", "err");
-      }} finally {{
-        btn.disabled = false;
-      }}
-    }});
-  </script>
-</body>
-</html>
-"""
 
 
 def lambda_handler(event, context):
-    method = (event.get("httpMethod") or "GET").upper()
-    if method != "GET":
-        return {
-            "statusCode": 405,
-            "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
-            "body": '{"msg":"Method Not Allowed"}',
-        }
+    logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
 
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"},
-        "body": HTML_PAGE,
+    #Get new DishID
+
+    # Ensure method and body are valid
+    if event.get("httpMethod") != "POST":
+        return helpers._response(400, {"msg": "Bad Request: only POST is supported"})
+
+    try:
+        payload = helpers._parse_body(event)
+        helpers._validate_payload(payload, REQUIRED_FIELDS)
+    except ValueError as ve:
+        logger.warning("Validation error: %s", ve)
+        return helpers._response(400, {"msg": str(ve)})
+
+    # Only the signed-in user may act as themselves.
+    denied = helpers.authorize_user(event, payload.get("userId"))
+    if denied:
+        return denied
+    logger.info("userId=%s", payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"]));
+    partition_key = 100  # Replace 'your_partition_key'
+    new_counter_value = helpers.increment_counter(partition_key, table)
+    print(f'New counter value: {new_counter_value}')
+    item = {
+        "ID": int(new_counter_value),
+        "zipcode": str(payload["zipcode"]),
+        "userId": payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"]),
+        "title": payload["title"],
+        "description": payload["description"],
+        "latitude": str(payload["latitude"]),
+        "longitude": str(payload["longitude"]),
+        "createdAt": str(datetime.now().isoformat())
     }
+
+
+    try:
+        table.put_item(Item=item)
+    except (BotoCoreError, ClientError) as e:
+        logger.exception("Failed to write item to DynamoDB")
+        return helpers._response(500, {"msg": "Failed to create request"})
+
+    return helpers._response(200, {"message": "Request posted", "ID": item["ID"]})

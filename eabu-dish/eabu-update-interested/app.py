@@ -16,11 +16,13 @@ REQUIRED_FIELDS = ["zipcode", "ID", "interested", "providerType", "cUserId"]
 EAT_PROVIDER_TABLE_NAME = os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider")
 LIVE_PROVIDER_TABLE_NAME = os.environ.get("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider")
 MOVE_PROVIDER_TABLE_NAME = os.environ.get("MOVE_PROVIDER_TABLE_NAME", "eabu-move-provider")
+LIFESTYLE_PROVIDER_TABLE_NAME = os.environ.get("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider")
 
 # New: interested tables
 EAT_INTERESTED_TABLE_NAME = os.environ.get("EAT_INTERESTED_TABLE_NAME", "eabu-eat-interested")
 LIVE_INTERESTED_TABLE_NAME = os.environ.get("LIVE_INTERESTED_TABLE_NAME", "eabu-live-interested")
 MOVE_INTERESTED_TABLE_NAME = os.environ.get("MOVE_INTERESTED_TABLE_NAME", "eabu-move-interested")
+LIFESTYLE_INTERESTED_TABLE_NAME = os.environ.get("LIFESTYLE_INTERESTED_TABLE_NAME", "eabu-lifestyle-interested")
 
 REGION_NAME = os.environ.get("REGION_NAME", "us-east-1")
 
@@ -29,10 +31,12 @@ dynamodb = boto3.resource("dynamodb", region_name=REGION_NAME)
 eat_table = dynamodb.Table(EAT_PROVIDER_TABLE_NAME)
 live_table = dynamodb.Table(LIVE_PROVIDER_TABLE_NAME)
 move_table = dynamodb.Table(MOVE_PROVIDER_TABLE_NAME)
+lifestyle_table = dynamodb.Table(LIFESTYLE_PROVIDER_TABLE_NAME)
 
 eat_interested_table = dynamodb.Table(EAT_INTERESTED_TABLE_NAME)
 live_interested_table = dynamodb.Table(LIVE_INTERESTED_TABLE_NAME)
 move_interested_table = dynamodb.Table(MOVE_INTERESTED_TABLE_NAME)
+lifestyle_interested_table = dynamodb.Table(LIFESTYLE_INTERESTED_TABLE_NAME)
 
 lambda_client = boto3.client("lambda", region_name=REGION_NAME)
 
@@ -44,6 +48,8 @@ def _get_table_for_provider(provider_type: str):
         return live_table, LIVE_PROVIDER_TABLE_NAME
     if normalized == "move":
         return move_table, MOVE_PROVIDER_TABLE_NAME
+    if normalized == "lifestyle":
+        return lifestyle_table, LIFESTYLE_PROVIDER_TABLE_NAME
     # default / "eat"
     return eat_table, EAT_PROVIDER_TABLE_NAME
 
@@ -54,6 +60,8 @@ def _get_interested_table_for_provider(provider_type: str):
         return live_interested_table, LIVE_INTERESTED_TABLE_NAME
     if normalized == "move":
         return move_interested_table, MOVE_INTERESTED_TABLE_NAME
+    if normalized == "lifestyle":
+        return lifestyle_interested_table, LIFESTYLE_INTERESTED_TABLE_NAME
     # default / "eat"
     return eat_interested_table, EAT_INTERESTED_TABLE_NAME
 

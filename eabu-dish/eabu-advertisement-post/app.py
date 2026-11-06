@@ -68,10 +68,15 @@ def lambda_handler(event, context):
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
+    # Submitting an ad requires a signed-in user.
+    denied = helpers.require_authenticated(event)
+    if denied:
+        return denied
+
     try:
         url = _clean_url(payload.get("url"))
         for field, limit in MAX_LEN.items():
-            if field != "url" and len(str(payload.get(field) or "")) > limit:
+            if len(str(payload.get(field) or "")) > limit:
                 raise ValueError(f"{field} is too long (max {limit} characters)")
     except ValueError as ve:
         return helpers._response(400, {"msg": str(ve)})

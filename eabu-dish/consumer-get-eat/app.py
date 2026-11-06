@@ -3,6 +3,8 @@ import logging
 import os
 from decimal import Decimal
 
+from my_utils import helpers
+
 import boto3
 from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Attr, Key
@@ -22,6 +24,7 @@ def decimal_serializer(obj):
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj).__name__))
 
 
+@helpers.cors
 def lambda_handler(event, context):
     current_timestamp = datetime.now().isoformat()
 
@@ -58,7 +61,7 @@ def lambda_handler(event, context):
 
         return {
             'statusCode': 200,
-            'body': json.dumps(response, default=decimal_serializer)
+            'body': json.dumps(helpers.query_result(response), default=decimal_serializer)
         }
 
     except Exception as e:

@@ -20,7 +20,10 @@ REQUIRED_FIELDS = [
 "offerDescription",
 "phoneNumber",
 "email",
-"price"
+"price",
+"zip",
+"latitude",
+"longitude"
 ]
 
 # Resolve environment configuration
@@ -29,6 +32,7 @@ region = os.environ.get("REGION_NAME", "us-east-1")
 # Initialize AWS resources (reuse across invocations if desired)
 dynamodb = boto3.resource("dynamodb", region_name=region)
 table = dynamodb.Table(table_name)
+consumer_table = dynamodb.Table(os.environ.get("EAT_CONSUMER_TABLE_NAME", "eabu-eat-consumer"))
 
 
 def lambda_handler(event, context):
@@ -52,13 +56,24 @@ def lambda_handler(event, context):
     if denied:
         return denied
 
+    # An offer must answer a real request from that consumer.
+    try:
+        item_id = int(payload["itemId"])
+        if not helpers.user_has_item(consumer_table, str(payload["userId"]), item_id):
+            return helpers._response(404, {"msg": "Request not found"})
+    except (TypeError, ValueError):
+        return helpers._response(400, {"msg": "itemId must be an integer"})
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to check the consumer request")
+        return helpers._response(500, {"msg": "Failed to create offer"})
+
     partition_key = 100  # Replace 'your_partition_key'
     new_counter_value = helpers.increment_counter(partition_key, table)
     print(f'New counter value: {new_counter_value}')
     item = {
         "ID": int(new_counter_value),
         "zipcode": str(payload["zip"]),
-        "itemId": int(payload["itemId"]),
+        "itemId": item_id,
         "userId": payload["userId"],
         "pUserId": payload["pUserId"],
         "title":payload["title"],

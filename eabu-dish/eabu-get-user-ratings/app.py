@@ -13,6 +13,7 @@ logger.setLevel(logging.INFO)
 EAT_PROVIDER_TABLE_NAME = os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider")
 LIVE_PROVIDER_TABLE_NAME = os.environ.get("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider")
 MOVE_PROVIDER_TABLE_NAME = os.environ.get("MOVE_PROVIDER_TABLE_NAME", "eabu-move-provider")
+LIFESTYLE_PROVIDER_TABLE_NAME = os.environ.get("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider")
 REGION_NAME = os.environ.get("REGION_NAME", "us-east-1")
 
 dynamodb = boto3.resource("dynamodb", region_name=REGION_NAME)
@@ -20,6 +21,7 @@ dynamodb = boto3.resource("dynamodb", region_name=REGION_NAME)
 eat_table = dynamodb.Table(EAT_PROVIDER_TABLE_NAME)
 live_table = dynamodb.Table(LIVE_PROVIDER_TABLE_NAME)
 move_table = dynamodb.Table(MOVE_PROVIDER_TABLE_NAME)
+lifestyle_table = dynamodb.Table(LIFESTYLE_PROVIDER_TABLE_NAME)
 
 
 def _extract_puser_id(event) -> str:
@@ -104,6 +106,7 @@ def _sum_ratings_for_user(table, pUserId: str) -> tuple[int, int]:
     return total_stars, ratings_count
 
 
+@helpers.cors
 def lambda_handler(event, context):
     logger.info("Received event: %s", json.dumps({k: event.get(k) for k in ("httpMethod", "queryStringParameters")}))
 
@@ -120,16 +123,14 @@ def lambda_handler(event, context):
             "body": json.dumps({"msg": "Missing required parameter: pUserId"}),
         }
 
-    # Sum ratings from all three tables
+    # Sum ratings from all category tables
     eat_ts, eat_rc = _sum_ratings_for_user(eat_table, pUserId)
     live_ts, live_rc = _sum_ratings_for_user(live_table, pUserId)
     move_ts, move_rc = _sum_ratings_for_user(move_table, pUserId)
+    lifestyle_ts, lifestyle_rc = _sum_ratings_for_user(lifestyle_table, pUserId)
 
-    total_stars = eat_ts + live_ts + live_rc + move_ts  # bug; correct below
-    total_ratings = eat_rc + live_rc + move_rc         # this is fine
-
-    # Fix total_stars (typo)
-    total_stars = eat_ts + live_ts + move_ts
+    total_stars = eat_ts + live_ts + move_ts + lifestyle_ts
+    total_ratings = eat_rc + live_rc + move_rc + lifestyle_rc
 
     if total_ratings == 0:
         average_rating = 0.0

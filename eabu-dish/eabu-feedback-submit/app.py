@@ -10,6 +10,8 @@ logger.setLevel(logging.INFO)
 
 FEEDBACK_TABLE = os.environ.get("EABU_FEEDBACK_TABLE_NAME", "eabu-feedback")
 REGION = os.environ.get("REGION_NAME", "us-east-1")
+MAX_FEEDBACK_LENGTH = 2000  # same as the form's maxlength
+MAX_EMAIL_LENGTH = 254
 
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 table = dynamodb.Table(FEEDBACK_TABLE)
@@ -347,11 +349,16 @@ def lambda_handler(event, context):
     except Exception:
         return _json_response(400, {"msg": "Invalid JSON"})
 
+    if not isinstance(payload, dict):
+        return _json_response(400, {"msg": "Invalid JSON"})
+
     feedback = payload.get("feedback")
     email = payload.get("email")
 
     if not isinstance(feedback, str) or not feedback.strip():
         return _json_response(400, {"msg": "Field 'feedback' is required"})
+    if len(feedback) > MAX_FEEDBACK_LENGTH or (isinstance(email, str) and len(email) > MAX_EMAIL_LENGTH):
+        return _json_response(400, {"msg": "Feedback is too long"})
 
     item = {
         "ID": int(datetime.now(timezone.utc).timestamp() * 1000),  # simple unique-ish id

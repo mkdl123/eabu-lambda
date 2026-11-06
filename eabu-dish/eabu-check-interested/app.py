@@ -19,6 +19,7 @@ REQUIRED_FIELDS = ["cUserId", "itemId","providerType"]
 EAT_INTERESTED_TABLE_NAME = os.environ.get("EAT_INTERESTED_TABLE_NAME", "eabu-eat-interested")
 LIVE_INTERESTED_TABLE_NAME = os.environ.get("LIVE_INTERESTED_TABLE_NAME", "eabu-live-interested")
 MOVE_INTERESTED_TABLE_NAME = os.environ.get("MOVE_INTERESTED_TABLE_NAME", "eabu-move-interested")
+LIFESTYLE_INTERESTED_TABLE_NAME = os.environ.get("LIFESTYLE_INTERESTED_TABLE_NAME", "eabu-lifestyle-interested")
 
 REGION_NAME = os.environ.get("REGION_NAME", "us-east-1")
 
@@ -29,6 +30,7 @@ dynamodb = boto3.resource("dynamodb", region_name=REGION_NAME)
 eat_interested_table = dynamodb.Table(EAT_INTERESTED_TABLE_NAME)
 live_interested_table = dynamodb.Table(LIVE_INTERESTED_TABLE_NAME)
 move_interested_table = dynamodb.Table(MOVE_INTERESTED_TABLE_NAME)
+lifestyle_interested_table = dynamodb.Table(LIFESTYLE_INTERESTED_TABLE_NAME)
 
 lambda_client = boto3.client("lambda", region_name=REGION_NAME)
 
@@ -41,6 +43,8 @@ def _get_interested_table_for_provider(provider_type: str):
         return live_interested_table
     if normalized == "move":
         return move_interested_table
+    if normalized == "lifestyle":
+        return lifestyle_interested_table
     # default / "eat"
     return eat_interested_table
 
