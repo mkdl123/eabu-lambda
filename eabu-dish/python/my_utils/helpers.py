@@ -147,6 +147,17 @@ def is_owner(event, user_id) -> bool:
     return not auth_enforced()
 
 
+# Listing fields anyone signed in may see on a seller's profile. Everything else
+# (phone, exact coordinates, interested_by, ...) is for the owner only.
+PUBLIC_LISTING_FIELDS = ("ID", "zipcode", "userId", "title", "description",
+                         "totalstars", "ratingscount", "createdAt")
+
+
+def public_listings(items):
+    """Copies of provider listings reduced to PUBLIC_LISTING_FIELDS."""
+    return [{k: item[k] for k in PUBLIC_LISTING_FIELDS if k in item} for item in items]
+
+
 def query_result(response: dict) -> dict:
     """A DynamoDB query response without the AWS metadata, safe to return to clients."""
     return {k: v for k, v in response.items() if k != "ResponseMetadata"}

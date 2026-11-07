@@ -38,9 +38,12 @@ def lambda_handler(event, context):
 
     userId = event['pathParameters']['userId']
 
-    denied = helpers.authorize_user(event, userId)
+    # The owner gets their full listings; anyone else signed in (e.g. a buyer
+    # viewing this seller's profile) gets the public fields only.
+    denied = helpers.require_authenticated(event)
     if denied:
         return denied
+    is_owner = helpers.get_caller_id(event) == str(userId)
     print("Parameter userId: ",userId);
 
     # last 30 days cutoff (epoch seconds, UTC)
@@ -54,9 +57,13 @@ def lambda_handler(event, context):
             FilterExpression=Attr("createdAt").gte(cutoff_iso),
         )
 
+        result = helpers.query_result(response)
+        if not is_owner:
+            result["Items"] = helpers.public_listings(result.get("Items", []))
+
         return {
             'statusCode': 200,
-            'body': json.dumps(helpers.query_result(response), default=decimal_serializer)
+            'body': json.dumps(result, default=decimal_serializer)
         }
 
     except Exception as e:

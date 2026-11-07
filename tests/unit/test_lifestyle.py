@@ -179,11 +179,14 @@ def test_enforced_auth_blocks_acting_as_someone_else(monkeypatch):
 
     for function, event in (
         ("consumer-lifestyle-offers", get("mallory", userId="buyer", itemId="NA")),
-        ("provider-my-lifestyle-services", get("mallory", userId="seller")),
         ("provider-get-lifestyle", get("mallory", zip="11111", userId="buyer")),
     ):
         assert load(function).lambda_handler(event, None)["statusCode"] == 403, function
     assert load("provider-get-lifestyle").lambda_handler(get(zip=ZIP, userId="NA"), None)["statusCode"] == 401
+    # Another user's services are viewable (seller profile) but only the public fields.
+    other = load("provider-my-lifestyle-services").lambda_handler(get("mallory", userId="seller"), None)
+    assert other["statusCode"] == 200 and "6105550100" not in other["body"]
+    assert load("provider-my-lifestyle-services").lambda_handler(get(userId="seller"), None)["statusCode"] == 401
 
 
 def test_template_grants_each_function_only_lifestyle_tables():

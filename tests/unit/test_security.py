@@ -306,6 +306,35 @@ def test_browsing_consumer_requests():
 
 
 @mock_aws
+def test_seller_profile_shows_public_listings():
+    now = datetime.now(timezone.utc).isoformat()
+    for cat in ("eat", "live", "move", "lifestyle"):
+        mk_with_user_index(f"eabu-{cat}-provider").put_item(Item={
+            "zipcode": "19060", "ID": 101, "userId": "alice", "title": "Meals", "description": "d",
+            "totalstars": 9, "ratingscount": 2, "createdAt": now, "phone": "5551234567",
+            "latitude": "39.8512345", "longitude": "-75.4312345", "interested_by": ["bob"]})
+        ms = load(f"provider-my-{cat}-services")
+
+        def get(caller=None):
+            ev = {"pathParameters": {"userId": "alice"}}
+            return ms.lambda_handler(as_user(ev, caller) if caller else ev, None)
+
+        os.environ["AUTH_MODE"] = "enforce"
+        try:
+            check(f"[enforce] {cat}: anonymous -> 401", get()["statusCode"] == 401)
+            own = json.loads(get("alice")["body"])["Items"][0]
+            check(f"{cat}: owner sees phone and interest", own["phone"] == "5551234567" and own["interested_by"] == ["bob"])
+            res = get("bob")
+            check(f"[enforce] {cat}: buyer can view a seller's listings", res["statusCode"] == 200)
+            item = json.loads(res["body"])["Items"][0]
+            check(f"{cat}: profile fields kept", (item["title"], str(item["ID"]), item["zipcode"], str(item["ratingscount"])) == ("Meals", "101", "19060", "2"))
+            for secret in ("5551234567", "39.85", "interested_by", "ResponseMetadata"):
+                check(f"{cat}: {secret} hidden from other users", secret not in res["body"])
+        finally:
+            os.environ["AUTH_MODE"] = "off"
+
+
+@mock_aws
 def test_offers_need_a_real_request():
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     offer = {"itemId": 101, "userId": "alice", "pUserId": "bob", "title": "t", "description": "d", "offerDescription": "o",
@@ -391,7 +420,8 @@ def test_auth_fails_closed_when_mode_is_missing():
 
 CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-identity", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
     name.format(c) for c in ("eat", "live", "move")
-    for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")]
+    for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")] + [
+    "provider-my-lifestyle-services"]
 
 
 @mock_aws
