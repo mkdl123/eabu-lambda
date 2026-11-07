@@ -99,7 +99,7 @@ Parameters:
     Description: Comma-separated ad statuses that may be listed publicly (case-insensitive).
   AuthUserIdClaim:
     Type: String
-    Default: sub
+    Default: "cognito:username"
     Description: Cognito claim that holds the app's userId (usually "sub" or "cognito:username").
   NotificationFunctionName:
     Type: String
