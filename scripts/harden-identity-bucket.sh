@@ -73,9 +73,18 @@ aws s3api put-bucket-ownership-controls --bucket "$BUCKET" \
   --ownership-controls 'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
 echo "ok  ACLs disabled (BucketOwnerEnforced)"
 
-aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration \
-  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
-echo "ok  default encryption SSE-S3"
+# Skip when SSE-S3 + Bucket Key is already set: put-bucket-encryption replaces the
+# whole config and would drop settings such as BlockedEncryptionTypes (SSE-C block).
+CURRENT_ENC=$(aws s3api get-bucket-encryption --bucket "$BUCKET" \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].[ApplyServerSideEncryptionByDefault.SSEAlgorithm,BucketKeyEnabled]' \
+  --output text 2>/dev/null || echo "")
+if [[ "$CURRENT_ENC" == $'AES256\tTrue' ]]; then
+  echo "skip default encryption: SSE-S3 with Bucket Key already set (keeping existing config)"
+else
+  aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+  echo "ok  default encryption SSE-S3"
+fi
 
 NEW_POLICY=$(BUCKET="$BUCKET" EXISTING_POLICY="$EXISTING_POLICY" python3 - <<'PY'
 import json, os
