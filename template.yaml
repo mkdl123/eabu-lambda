@@ -87,7 +87,7 @@ Parameters:
     Type: String
   AuthMode:
     Type: String
-    Default: "off"
+    Default: "enforce"
     AllowedValues: ["off", "enforce"]
     Description: >-
       "off" logs requests that would be rejected (rollout mode); "enforce" rejects
