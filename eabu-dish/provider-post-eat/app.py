@@ -69,6 +69,10 @@ def lambda_handler(event, context):
         "ratingscount":0,
         "createdAt": str(datetime.now().isoformat())
     }
+    # Optional street address so buyers/sellers can find the place on a map.
+    address = helpers.optional_address(payload)
+    if address:
+        item["address"] = address
 
 
     try:

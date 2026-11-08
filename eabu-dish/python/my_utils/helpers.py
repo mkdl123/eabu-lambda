@@ -16,7 +16,7 @@ FIELD_LIMITS = {
     "zipcode": 10, "zip": 10, "userId": 128, "pUserId": 128, "cUserId": 128,
     "title": 200, "description": 5000, "offerDescription": 5000, "message": 5000,
     "phone": 32, "phoneNumber": 32, "email": 254, "price": 32, "serviceType": 100,
-    "latitude": 32, "longitude": 32,
+    "latitude": 32, "longitude": 32, "address": 200,
 }
 COORDINATE_FIELDS = ("latitude", "longitude")
 MAX_NUMBER_LENGTH = 32  # DynamoDB numbers hold 38 digits at most
@@ -150,7 +150,16 @@ def is_owner(event, user_id) -> bool:
 # Listing fields anyone signed in may see on a seller's profile. Everything else
 # (phone, exact coordinates, interested_by, ...) is for the owner only.
 PUBLIC_LISTING_FIELDS = ("ID", "zipcode", "userId", "title", "description",
-                         "totalstars", "ratingscount", "createdAt")
+                         "address", "totalstars", "ratingscount", "createdAt")
+
+
+def optional_address(payload: dict):
+    """The poster's optional pickup/service address, trimmed; None when not given."""
+    value = payload.get("address")
+    if not isinstance(value, str):
+        return None
+    value = " ".join(value.split())
+    return value or None
 
 
 def public_listings(items):

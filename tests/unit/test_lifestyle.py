@@ -206,3 +206,35 @@ def test_template_grants_each_function_only_lifestyle_tables():
         assert os.path.exists(os.path.join(ROOT, "eabu-dish", folder, "app.py"))
         assert f"table/${{{table_param}TableName}}" in block
         assert not re.search(r"table/\$\{(Eat|Live|Move)", block), logical
+
+
+@mock_aws
+@pytest.mark.parametrize("role", ["provider", "consumer"])
+@pytest.mark.parametrize("category", ["eat", "live", "move", "lifestyle"])
+def test_post_stores_optional_address(category, role):
+    tables = make_tables()
+    base = {"zipcode": ZIP, "title": "T", "description": "D", "phone": "6105550100", "userId": "u", **LOCATION}
+    fn = load(f"{role}-post-{category}")
+
+    with_address = body(fn.lambda_handler(post({**base, "address": "  12 Main St,\n Media PA "}), None))["ID"]
+    without = body(fn.lambda_handler(post(base), None))["ID"]
+    blank = body(fn.lambda_handler(post({**base, "address": "   "}), None))["ID"]
+
+    get_item = lambda i: tables[f"{category}-{role}"].get_item(Key={"zipcode": ZIP, "ID": i})["Item"]
+    assert get_item(with_address)["address"] == "12 Main St, Media PA"
+    assert "address" not in get_item(without)
+    assert "address" not in get_item(blank)
+
+    too_long = fn.lambda_handler(post({**base, "address": "x" * 201}), None)
+    assert too_long["statusCode"] == 400
+
+
+@mock_aws
+def test_address_is_shown_on_seller_profile():
+    make_tables()
+    load("provider-post-lifestyle").lambda_handler(
+        post({"zipcode": ZIP, "title": "Gym", "description": "Walk in", "phone": "6105550100", "userId": "seller",
+              "address": "1 Gym Rd", **LOCATION}), None)
+    other = body(load("provider-my-lifestyle-services").lambda_handler(get("mallory", userId="seller"), None))
+    assert other["Items"][0]["address"] == "1 Gym Rd"
+    assert "phone" not in other["Items"][0]
