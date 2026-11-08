@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Add the Lifestyle routes to the hand-managed REST API behind api.eabu.net. Each route
-# copies its /eabu-live*, /offer-live or /provider-my-live-services equivalent: Cognito
-# authorizer, Lambda proxy integration, mock OPTIONS for CORS.
+# Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle routes, and the
+# selfie delete route). Each route gets the Cognito authorizer, a Lambda proxy integration
+# and a mock OPTIONS for CORS, like the existing routes.
 #
-#   ./scripts/create-lifestyle-routes.sh            # report only, changes nothing
-#   ./scripts/create-lifestyle-routes.sh --apply    # create missing routes (not live yet)
-#   ./scripts/create-lifestyle-routes.sh --deploy   # publish the API to the stage
+#   ./scripts/create-api-routes.sh            # report only, changes nothing
+#   ./scripts/create-api-routes.sh --apply    # create missing routes (not live yet)
+#   ./scripts/create-api-routes.sh --deploy   # publish the API to the stage
 #
-# Run --apply AFTER `sam deploy`, because it needs the new functions. Both steps are safe
-# to re-run. --deploy publishes EVERY pending change on this API, not only these routes,
+# Run --apply AFTER `sam deploy`, because it needs the functions. Routes that already
+# exist are left alone, so both steps are safe to re-run. --deploy publishes EVERY pending change on this API, not only these routes,
 # so check for other console edits first. It prints the command to roll back.
 set -euo pipefail
 
@@ -25,7 +25,7 @@ api() { aws apigateway --region "$REGION" "$@"; }
 if [[ "$MODE" == "--deploy" ]]; then
   previous=$(api get-stage --rest-api-id "$API_ID" --stage-name "$STAGE" --query deploymentId --output text)
   current=$(api create-deployment --rest-api-id "$API_ID" --stage-name "$STAGE" \
-    --description "Add Lifestyle routes" --query id --output text)
+    --description "${DEPLOY_DESCRIPTION:-Add API routes}" --query id --output text)
   echo "Deployed $current to $STAGE (was $previous). To roll back:"
   echo "  aws apigateway update-stage --region $REGION --rest-api-id $API_ID --stage-name $STAGE \\"
   echo "    --patch-operations op=replace,path=/deploymentId,value=$previous"
@@ -41,6 +41,7 @@ ROUTES=(
   "POST /offer-lifestyle LifestyleOfferFunction"
   "GET /offer-lifestyle/{userId}/{itemId} ConsumerReceivedLifestyleOfferFunction"
   "GET /provider-my-lifestyle-services/{userId} ProviderMyLifestyleServicesFunction"
+  "DELETE /identity/{userId} ProviderUploadIdentityPictures"
 )
 
 resource_id() { # path -> id, or empty when the resource does not exist

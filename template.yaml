@@ -783,6 +783,7 @@ Resources:
   ProviderUploadIdentityPictures:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
+      # Optional selfie only: POST /identity uploads or replaces it, DELETE /identity/{userId} removes it.
       CodeUri: eabu-dish/eabu-identity
       Handler: app.lambda_handler
       Policies:
@@ -790,17 +791,10 @@ Resources:
           Statement:
             - Effect: Allow
               Action:
-                - dynamodb:Query
-                - dynamodb:PutItem
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuIdentityTableName}'
-            - Effect: Allow
-              Action:
                 - s3:PutObject
+                - s3:DeleteObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/selfie.jpg'
-                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/license_front.jpg'
-                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/license_back.jpg'
 
   EabuAdvertisement:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

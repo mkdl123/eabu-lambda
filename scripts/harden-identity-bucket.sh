@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Harden the S3 bucket that stores identity documents (selfies, driver's licenses).
+# Harden the S3 bucket that stores users' optional selfies (it also held driver's licence
+# images until licence uploads were removed).
 #
 # Designed to run in AWS CloudShell (AWS CLI + python3 preinstalled).
 #

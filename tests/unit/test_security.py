@@ -74,41 +74,64 @@ def jpeg_b64(size=(64, 64)):
 
 
 @mock_aws
-def test_identity():
-    ddb = boto3.resource("dynamodb", region_name="us-east-1")
-    tbl = mk(ddb, "eabu-identity", "userId", "S")
+def test_selfie_upload_replace_delete():
     s3 = boto3.client("s3", region_name="us-east-1"); s3.create_bucket(Bucket="eabu-identity-pictures")
     m = load("eabu-identity")
-    img = jpeg_b64()
-    body = {"user_id": "user123", "selfie": img, "license_front": img, "license_back": img,
-            "address": "1 Main", "full_name": "A B", "email": "a@b.c", "phone": "123"}
+    keys = lambda: sorted(o["Key"] for o in s3.list_objects_v2(Bucket="eabu-identity-pictures").get("Contents", []))
+    selfie = lambda uid="user123": s3.get_object(Bucket="eabu-identity-pictures", Key=f"{uid}/selfie.jpg")["Body"].read()
 
-    res = m.lambda_handler(post(body), None)
-    check("valid identity submission accepted", res["statusCode"] == 200)
-    keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket="eabu-identity-pictures")["Contents"])
-    check("three images uploaded under user prefix", keys == ["user123/license_back.jpg", "user123/license_front.jpg", "user123/selfie.jpg"])
+    res = m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64()}), None)
+    check("selfie-only upload accepted", res["statusCode"] == 200)
+    check("only the selfie is stored", keys() == ["user123/selfie.jpg"])
+    check("response hides bucket name", "eabu-identity-pictures" not in res["body"])
 
-    res = m.lambda_handler(post({**body, "user_id": "../other"}), None)
-    check("path-like user_id rejected", res["statusCode"] == 400)
-    res = m.lambda_handler(post({**body, "user_id": "a/b"}), None)
-    check("user_id with slash rejected", res["statusCode"] == 400)
+    # Older app versions still send licence images: they must be ignored, never stored.
+    res = m.lambda_handler(post({"user_id": "old", "selfie": jpeg_b64(), "license_front": jpeg_b64(),
+                                 "license_back": jpeg_b64(), "address": "1 Main"}), None)
+    check("old-app payload accepted", res["statusCode"] == 200)
+    check("licence images never stored", not any("license" in k for k in keys()))
 
-    res = m.lambda_handler(post({**body, "user_id": "u2", "license_back": base64.b64encode(b"<?php evil ?>").decode()}), None)
-    check("non-image rejected with no details leaked", res["statusCode"] == 400 and "details" not in res["body"])
-    check("no partial upload for rejected submission",
-          not any(o["Key"].startswith("u2/") for o in s3.list_objects_v2(Bucket="eabu-identity-pictures")["Contents"]))
+    first = selfie()
+    res = m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64((32, 32))}), None)
+    check("re-upload replaces the selfie", res["statusCode"] == 200 and selfie() != first)
+    check("still exactly one selfie for the user", [k for k in keys() if k.startswith("user123/")] == ["user123/selfie.jpg"])
 
+    check("missing selfie -> 400", m.lambda_handler(post({"user_id": "u9"}), None)["statusCode"] == 400)
+    check("non-image -> 400", m.lambda_handler(post({"user_id": "u9", "selfie": base64.b64encode(b"<?php evil ?>").decode()}), None)["statusCode"] == 400)
     gif = io.BytesIO(); Image.new("RGB", (8, 8)).save(gif, format="GIF")
-    res = m.lambda_handler(post({**body, "user_id": "u3", "selfie": base64.b64encode(gif.getvalue()).decode()}), None)
-    check("disallowed format (GIF) rejected", res["statusCode"] == 400)
+    check("disallowed format (GIF) -> 400", m.lambda_handler(post({"user_id": "u9", "selfie": base64.b64encode(gif.getvalue()).decode()}), None)["statusCode"] == 400)
+    check("path traversal user_id -> 400", m.lambda_handler(post({"user_id": "../x", "selfie": jpeg_b64()}), None)["statusCode"] == 400)
+    check("rejected uploads store nothing", not any(k.startswith("u9/") for k in keys()))
 
-    tbl.update_item(Key={"userId": "user123"}, UpdateExpression="SET verified = :t", ExpressionAttributeValues={":t": True})
-    before = s3.get_object(Bucket="eabu-identity-pictures", Key="user123/selfie.jpg")["ETag"]
-    res = m.lambda_handler(post({**body, "selfie": jpeg_b64((32, 32))}), None)
-    after = s3.get_object(Bucket="eabu-identity-pictures", Key="user123/selfie.jpg")["ETag"]
-    check("verified identity cannot be overwritten (409)", res["statusCode"] == 409)
-    check("verified user's selfie left untouched", before == after)
-    check("verified flag preserved", tbl.get_item(Key={"userId": "user123"})["Item"]["verified"] is True)
+    delete = lambda uid: {"httpMethod": "DELETE", "pathParameters": {"userId": uid}}
+    res = m.lambda_handler(delete("user123"), None)
+    check("delete succeeds", res["statusCode"] == 200 and "user123/selfie.jpg" not in keys())
+    check("deleting again is harmless", m.lambda_handler(delete("user123"), None)["statusCode"] == 200)
+    check("other users' selfies untouched", "old/selfie.jpg" in keys())
+    check("can upload again after delete", m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64()}), None)["statusCode"] == 200)
+    check("unsupported method -> 405", m.lambda_handler({"httpMethod": "GET"}, None)["statusCode"] == 405)
+
+    os.environ["AUTH_MODE"] = "enforce"
+    try:
+        check("[enforce] upload for someone else -> 403",
+              m.lambda_handler(as_user(post({"user_id": "old", "selfie": jpeg_b64()}), "mallory"), None)["statusCode"] == 403)
+        check("[enforce] delete someone else's selfie -> 403", m.lambda_handler(as_user(delete("old"), "mallory"), None)["statusCode"] == 403)
+        check("[enforce] unauthenticated delete -> 401", m.lambda_handler(delete("old"), None)["statusCode"] == 401)
+        check("[enforce] rejected delete leaves selfie", "old/selfie.jpg" in keys())
+        check("[enforce] owner can delete", m.lambda_handler(as_user(delete("old"), "old"), None)["statusCode"] == 200 and "old/selfie.jpg" not in keys())
+    finally:
+        os.environ["AUTH_MODE"] = "off"
+
+
+@mock_aws
+def test_selfie_link_only_when_present():
+    s3 = boto3.client("s3", region_name="us-east-1"); s3.create_bucket(Bucket="eabu-identity-pictures")
+    eu = load("eabu-user")
+    get = lambda uid: json.loads(eu.lambda_handler({"pathParameters": {"pUserId": uid}}, None)["body"])
+    check("no selfie -> url is null", get("nobody") == {"url": None})
+    s3.put_object(Bucket="eabu-identity-pictures", Key="alice/selfie.jpg", Body=b"x")
+    url = get("alice")["url"]
+    check("selfie -> presigned link to it", url and "alice/selfie.jpg" in url)
 
 
 @mock_aws
@@ -383,16 +406,6 @@ def test_input_limits():
     ap = load("eabu-advertisement-post")
     ad = {"address": "a", "name": "n", "email": "e@x.com", "phone": "1", "zipcode": "1", "title": "t", "subtitle": "s", "description": "d"}
     check("oversized ad url -> 400", ap.lambda_handler(post({**ad, "url": "https://x.co/" + "a" * 2048}), None)["statusCode"] == 400)
-
-
-@mock_aws
-def test_identity_response_hides_bucket():
-    mk(boto3.resource("dynamodb", region_name="us-east-1"), "eabu-identity", "userId", "S")
-    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="eabu-identity-pictures")
-    img = jpeg_b64()
-    res = load("eabu-identity").lambda_handler(post({"user_id": "u1", "selfie": img, "license_front": img, "license_back": img,
-                                                     "address": "a", "full_name": "n", "email": "e@x.com", "phone": "1"}), None)
-    check("upload ok, bucket name not returned", res["statusCode"] == 200 and "eabu-identity-pictures" not in res["body"])
 
 
 @mock_aws

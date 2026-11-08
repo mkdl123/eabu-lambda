@@ -1,3 +1,12 @@
+"""Optional profile selfie: upload (replacing any earlier one) or delete.
+
+POST   /identity            body {"user_id", "selfie": <base64 image>}
+DELETE /identity/{userId}
+
+Each user has at most one selfie, stored at {userId}/selfie.jpg. The bucket is not
+versioned, so an upload overwrites the previous selfie and a delete removes it for good.
+No other images are accepted or stored.
+"""
 import json
 import os
 from my_utils import helpers
@@ -5,8 +14,6 @@ from my_utils import helpers
 import boto3
 import logging
 import base64
-from datetime import datetime
-from typing import Dict, Any
 import io
 import re
 import warnings
@@ -28,13 +35,6 @@ USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_@.+:-]{1,128}$")
 # Guard against decompression bombs: refuse anything over ~50 megapixels.
 Image.MAX_IMAGE_PIXELS = 50_000_000
 warnings.simplefilter("error", Image.DecompressionBombWarning)
-
-# Resolve environment configuration
-table_name = os.environ.get('EABU_IDENTITY_TABLE_NAME', 'eabu-identity')
-region = os.environ.get('REGION_NAME', 'us-east-1')
-dynamodb = boto3.resource("dynamodb", region_name=region)
-table = dynamodb.Table(table_name)
-
 
 def validate_image_base64(base64_data: str, image_type: str) -> bytes:
     """Validate and convert base64 image data"""
@@ -97,146 +97,75 @@ def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
         logger.error("Image optimization failed: %s", e)
         raise ValueError("Image could not be processed")
 
-def upload_to_s3(image_data: bytes, user_id: str, image_type: str, timestamp: str) -> str:
-    """Upload image to S3 and return its key"""
+def selfie_key(user_id: str) -> str:
+    return f"{user_id}/selfie.jpg"
+
+
+def _authorized_user_id(event, user_id):
+    """Return (user_id, None) when the caller may manage this user's selfie, else (None, response)."""
+    if not isinstance(user_id, str) or not USER_ID_PATTERN.match(user_id) or ".." in user_id:
+        return None, helpers._response(400, {"msg": "Invalid user_id"})
+    denied = helpers.authorize_user(event, user_id)
+    if denied:
+        return None, denied
+    return user_id, None
+
+
+def upload_selfie(event):
+    if not event.get('body'):
+        return helpers._response(400, {"msg": "Request body is required"})
     try:
-        #s3_key = f"users/{user_id}/{timestamp}/{image_type}.jpg"
-        s3_key = f"{user_id}/{image_type}.jpg"
-        s3_client.put_object(
-            Bucket=BUCKET_NAME,
-            Key=s3_key,
-            Body=image_data,
-            ContentType='image/jpeg'
-        )
-        
-        return s3_key
-    except Exception as e:
-        logger.error("Failed to upload %s: %s", image_type, e)
-        raise Exception(f"Failed to upload {image_type}")
+        body = helpers._parse_body(event)
+    except ValueError:
+        return helpers._response(400, {"msg": "Invalid JSON format"})
+    if not isinstance(body, dict):
+        return helpers._response(400, {"msg": "Invalid JSON format"})
+
+    user_id, denied = _authorized_user_id(event, body.get('user_id'))
+    if denied:
+        return denied
+
+    # Any other fields (older app versions also sent licence images) are ignored, never stored.
+    base64_data = body.get('selfie')
+    if not isinstance(base64_data, str) or not base64_data:
+        return helpers._response(400, {"msg": "selfie is required"})
+    try:
+        image_data = optimize_image(validate_image_base64(base64_data, 'selfie'))
+    except ValueError:
+        return helpers._response(400, {"msg": "Error processing selfie"})
+
+    try:
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=selfie_key(user_id), Body=image_data,
+                             ContentType='image/jpeg')
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to upload selfie")
+        return helpers._response(500, {"msg": "Failed to upload selfie"})
+
+    return helpers._response(200, {"message": "Selfie saved", "userId": user_id})
+
+
+def delete_selfie(event):
+    user_id, denied = _authorized_user_id(event, (event.get('pathParameters') or {}).get('userId'))
+    if denied:
+        return denied
+    try:
+        # Succeeds whether or not a selfie exists, so deleting twice is harmless.
+        s3_client.delete_object(Bucket=BUCKET_NAME, Key=selfie_key(user_id))
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to delete selfie")
+        return helpers._response(500, {"msg": "Failed to delete selfie"})
+    return helpers._response(200, {"message": "Selfie deleted", "userId": user_id})
+
 
 @helpers.cors
 def lambda_handler(event, context):
     try:
-        # Parse JSON body
-        if not event.get('body'):
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Request body is required'})
-            }
-            
-        try:
-            body = helpers._parse_body(event)
-        except ValueError:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid JSON format'})
-            }
-        if not isinstance(body, dict):
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid JSON format'})
-            }
-
-        # Validate required fields
-        required_fields = ['user_id', 'selfie', 'license_front', 'license_back', 'address', 'full_name', 'email', 'phone']
-        missing_fields = [field for field in required_fields if field not in body]
-
-        if missing_fields:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'error': f'Missing required fields: {", ".join(missing_fields)}'
-                })
-            }
-
-        user_id = body['user_id']
-        if not isinstance(user_id, str) or not USER_ID_PATTERN.match(user_id) or ".." in user_id:
-            return helpers._response(400, {"msg": "Invalid user_id"})
-
-        # Only the signed-in user may submit their own identity documents.
-        denied = helpers.authorize_user(event, user_id)
-        if denied:
-            return denied
-
-        # Do not let a submission overwrite an identity that has already been verified.
-        try:
-            existing = table.query(
-                KeyConditionExpression="userId = :userId",
-                ExpressionAttributeValues={':userId': user_id},
-                Limit=1,
-            ).get('Items', [])
-        except (BotoCoreError, ClientError):
-            logger.exception("Failed to read existing identity record")
-            return helpers._response(500, {"msg": "Failed to enter User Identity record"})
-        if existing and existing[0].get('verified') is True:
-            return helpers._response(409, {"msg": "Identity already verified; contact support to change it"})
-
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        uploaded_files = {}
-
-        # Validate and re-encode every image before uploading any of them,
-        # so a bad image cannot leave a partially-overwritten set in S3.
-        processed = {}
-        for image_type in ('selfie', 'license_front', 'license_back'):
-            base64_data = body[image_type]
-            if not isinstance(base64_data, str):
-                return helpers._response(400, {"msg": f"Error processing {image_type}"})
-            try:
-                image_data = validate_image_base64(base64_data, image_type)
-                processed[image_type] = optimize_image(image_data)
-            except Exception:
-                return {
-                    'statusCode': 400,
-                    'body': json.dumps({'error': f'Error processing {image_type}'})
-                }
-
-        for image_type, optimized_data in processed.items():
-            try:
-                uploaded_files[image_type] = upload_to_s3(optimized_data, user_id, image_type, timestamp)
-            except Exception:
-                return helpers._response(500, {"msg": f"Failed to upload {image_type}"})
-
-        try:
-            # go for a record entry in eabu-identity table:
-            item = {
-                "userId": user_id,
-                "submitted": True,
-                "verified": False,
-                "fullname": str(body["full_name"])[:200],
-                "email": str(body["email"])[:254],
-                "phone": str(body["phone"])[:32],
-                "address": str(body["address"])[:500],
-            }
-            table.put_item(Item=item)
-        except (BotoCoreError, ClientError) as e:
-            logger.exception("Failed to write item to DynamoDB")
-            return helpers._response(500, {
-                "msg": "Failed to enter User Identity record"})
-
-        #return helpers._response(200, {"message": "Recipe posted ", "ID": item["ID"]})
-        # Return success response
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Images uploaded successfully',
-                'userId': user_id,
-                'timestamp': timestamp,
-                'files': uploaded_files
-            }),
-            'headers': {
-                'Content-Type': 'application/json'
-            }
-        }
-        
-    except Exception as e:
+        method = (event.get('httpMethod') or '').upper()
+        if method == 'DELETE':
+            return delete_selfie(event)
+        if method == 'POST':
+            return upload_selfie(event)
+        return helpers._response(405, {"msg": "Method not allowed"})
+    except Exception:
         logger.exception("Lambda execution failed")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': 'Internal server error'
-            }),
-            'headers': {
-                'Content-Type': 'application/json'
-            }
-        }
-
+        return helpers._response(500, {"msg": "Internal server error"})

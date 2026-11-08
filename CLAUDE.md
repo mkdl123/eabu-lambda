@@ -84,11 +84,11 @@ Tables are created outside the SAM stack (for Lifestyle: `scripts/create-lifesty
 
 ### API Gateway
 
-The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new route needs setting up there as well as its function (for Lifestyle: `scripts/create-lifestyle-routes.sh`).
+The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new route needs setting up there as well as its function (`scripts/create-api-routes.sh` adds them).
 
 ### S3
 
-- `eabu-identity-pictures` — stores selfie/license images for identity verification; keyed as `{userId}/{selfie|license_front|license_back}.jpg`. The `eabu-user` function generates presigned GET URLs from this bucket.
+- `eabu-identity-pictures` — stores each user's optional selfie at `{userId}/selfie.jpg` (one per user; the bucket is unversioned, so a new upload replaces the old one). `eabu-identity` handles `POST /identity` (upload/replace) and `DELETE /identity/{userId}`; no other identity images are collected. The `eabu-user` function generates presigned GET URLs from this bucket.
 
 ### Notification pattern
 

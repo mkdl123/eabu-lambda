@@ -150,8 +150,8 @@ HTML_PAGE = f"""<!doctype html>
         </p>
 
         <p>
-          For trust and safety, Eabu verifies service providers using an <strong>ID</strong> check and a <strong>selfie</strong>,
-          so buyers can feel more confident about authenticity.
+          Buyers and sellers can add an optional <strong>selfie</strong> to their profile, which they can replace or delete at any time,
+          so the people they deal with know who to expect.
         </p>
       </section>
 
@@ -203,7 +203,7 @@ HTML_PAGE = f"""<!doctype html>
           </li>
           <li>
             <strong>Is it safe to use Eabu services?</strong><br />
-            Eabu does basic verification of service providers/sellers’ identity, but you should do your due diligence before using products or services from a provider. Eabu does not verify any services or products of sellers.
+            Eabu does not verify the identity of service providers/sellers, so you should do your due diligence before using products or services from a provider. Eabu does not verify any services or products of sellers.
           </li>
         </ul>
       </section>
