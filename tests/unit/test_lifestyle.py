@@ -238,3 +238,30 @@ def test_address_is_shown_on_seller_profile():
     other = body(load("provider-my-lifestyle-services").lambda_handler(get("mallory", userId="seller"), None))
     assert other["Items"][0]["address"] == "1 Gym Rd"
     assert "phone" not in other["Items"][0]
+
+
+@mock_aws
+@pytest.mark.parametrize("category", ["eat", "live", "move", "lifestyle"])
+def test_seller_post_limit_is_ten_per_30_days(category):
+    from datetime import datetime, timedelta, timezone
+    tables = make_tables()
+    fn = load(f"provider-post-{category}")
+    payload = lambda user="seller": post({"zipcode": ZIP, "title": "T", "description": "D", "phone": "6105550100",
+                                          "userId": user, **LOCATION})
+
+    # Posts older than 30 days don't count.
+    old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    for i in range(5):
+        tables[f"{category}-provider"].put_item(Item={"zipcode": ZIP, "ID": 5000 + i, "userId": "seller", "createdAt": old})
+
+    for _ in range(10):
+        assert fn.lambda_handler(payload(), None)["statusCode"] == 200
+    res = fn.lambda_handler(payload(), None)
+    assert res["statusCode"] == 429 and body(res)["code"] == "POST_LIMIT"
+    assert "eabu-" not in res["body"]
+    stored = tables[f"{category}-provider"].scan()["Items"]
+    assert len([i for i in stored if i.get("userId") == "seller"]) == 15, "the 11th post was not stored"
+
+    assert fn.lambda_handler(payload("other-seller"), None)["statusCode"] == 200, "limits are per seller"
+    other = "eat" if category != "eat" else "live"
+    assert load(f"provider-post-{other}").lambda_handler(payload(), None)["statusCode"] == 200, "and per category"

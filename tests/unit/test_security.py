@@ -19,7 +19,12 @@ def mk(ddb, name, hk, hkt, rk=None, rkt=None):
     ks = [{"AttributeName": hk, "KeyType": "HASH"}]; ad = [{"AttributeName": hk, "AttributeType": hkt}]
     if rk:
         ks.append({"AttributeName": rk, "KeyType": "RANGE"}); ad.append({"AttributeName": rk, "AttributeType": rkt})
-    return ddb.create_table(TableName=name, KeySchema=ks, AttributeDefinitions=ad, BillingMode="PAY_PER_REQUEST")
+    extra = {}
+    if name.endswith("-provider"):  # like production: seller posts query userId-index (post limit)
+        ad.append({"AttributeName": "userId", "AttributeType": "S"})
+        extra["GlobalSecondaryIndexes"] = [{"IndexName": "userId-index", "Projection": {"ProjectionType": "ALL"},
+                                            "KeySchema": [{"AttributeName": "userId", "KeyType": "HASH"}]}]
+    return ddb.create_table(TableName=name, KeySchema=ks, AttributeDefinitions=ad, BillingMode="PAY_PER_REQUEST", **extra)
 
 
 def post(body):

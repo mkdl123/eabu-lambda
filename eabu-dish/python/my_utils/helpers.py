@@ -190,6 +190,46 @@ def attach_picture_urls(items, category: str):
     return items
 
 
+# A seller may post at most this many services per category in any 30 days
+# (the app checks first; this is the server-side guard).
+MONTHLY_POST_LIMIT = 10
+POST_LIMIT_DAYS = 30
+
+
+def recent_post_count(table, user_id: str, days: int = POST_LIMIT_DAYS) -> int:
+    """How many listings this user created in the table in the last `days` days."""
+    from datetime import timedelta
+    from boto3.dynamodb.conditions import Attr
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    kwargs = {
+        "IndexName": "userId-index",
+        "KeyConditionExpression": Key("userId").eq(str(user_id)),
+        "FilterExpression": Attr("createdAt").gte(cutoff),
+        "Select": "COUNT",
+    }
+    count = 0
+    while True:
+        page = table.query(**kwargs)
+        count += page.get("Count", 0)
+        if "LastEvaluatedKey" not in page:
+            return count
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def post_limit_reached(table, user_id: str):
+    """None while the user may still post here, else a 429 response."""
+    try:
+        if recent_post_count(table, user_id) < MONTHLY_POST_LIMIT:
+            return None
+    except (BotoCoreError, ClientError):
+        logger.exception("Could not check the post limit")
+        return _response(500, {"msg": "Could not create the post. Please try again."})
+    return _response(429, {
+        "msg": f"You already posted {MONTHLY_POST_LIMIT} services in this category in the last {POST_LIMIT_DAYS} days.",
+        "code": "POST_LIMIT",
+    })
+
+
 def optional_address(payload: dict):
     """The poster's optional pickup/service address, trimmed; None when not given."""
     value = payload.get("address")

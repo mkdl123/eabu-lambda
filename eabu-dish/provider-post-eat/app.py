@@ -51,6 +51,10 @@ def lambda_handler(event, context):
     denied = helpers.authorize_user(event, payload.get("userId"))
     if denied:
         return denied
+    # At most helpers.MONTHLY_POST_LIMIT posts per category in 30 days (sellers can't delete posts).
+    limited = helpers.post_limit_reached(table, payload["userId"])
+    if limited:
+        return limited
     logger.info("userId=%s", payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"]));
     partition_key = 100  # Replace 'your_partition_key'
     new_counter_value = helpers.increment_counter(partition_key, table)
