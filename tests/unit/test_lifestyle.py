@@ -265,3 +265,32 @@ def test_seller_post_limit_is_ten_per_30_days(category):
     assert fn.lambda_handler(payload("other-seller"), None)["statusCode"] == 200, "limits are per seller"
     other = "eat" if category != "eat" else "live"
     assert load(f"provider-post-{other}").lambda_handler(payload(), None)["statusCode"] == 200, "and per category"
+
+
+@mock_aws
+def test_repost_of_expired_listing_respects_post_limit(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    tables = make_tables()
+    t = tables["eat-provider"]
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=40)).isoformat()
+    recent = (now - timedelta(days=2)).isoformat()
+    t.put_item(Item={"zipcode": ZIP, "ID": 900, "userId": "seller", "createdAt": old})       # expired
+    t.put_item(Item={"zipcode": ZIP, "ID": 901, "userId": "seller", "createdAt": recent})    # live
+    repost = lambda item_id, user="seller": load("provider-repost").lambda_handler(
+        {**post({"itemId": item_id, "serviceCategory": "Eat", "zipcode": ZIP}),
+         "requestContext": {"authorizer": {"claims": {"sub": user}}}}, None)
+
+    assert repost(900)["statusCode"] == 200, "under the limit an expired listing can be revived"
+    t.put_item(Item={"zipcode": ZIP, "ID": 900, "userId": "seller", "createdAt": old})
+    for i in range(9):  # 901 + 9 more = 10 live posts
+        t.put_item(Item={"zipcode": ZIP, "ID": 1000 + i, "userId": "seller", "createdAt": recent})
+
+    res = repost(900)
+    assert res["statusCode"] == 429 and body(res)["code"] == "POST_LIMIT"
+    assert t.get_item(Key={"zipcode": ZIP, "ID": 900})["Item"]["createdAt"] == old, "not revived"
+    assert repost(901)["statusCode"] == 200, "reposting a live listing doesn't add a post"
+
+    monkeypatch.setenv("AUTH_MODE", "enforce")
+    assert repost(901, user="mallory")["statusCode"] == 404
+    assert repost(424242)["statusCode"] == 404

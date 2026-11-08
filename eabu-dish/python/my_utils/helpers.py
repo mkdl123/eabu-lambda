@@ -196,11 +196,16 @@ MONTHLY_POST_LIMIT = 10
 POST_LIMIT_DAYS = 30
 
 
+def post_limit_cutoff(days: int = POST_LIMIT_DAYS) -> str:
+    """createdAt values at or after this string fall inside the post-limit window."""
+    from datetime import timedelta
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
 def recent_post_count(table, user_id: str, days: int = POST_LIMIT_DAYS) -> int:
     """How many listings this user created in the table in the last `days` days."""
-    from datetime import timedelta
     from boto3.dynamodb.conditions import Attr
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cutoff = post_limit_cutoff(days)
     kwargs = {
         "IndexName": "userId-index",
         "KeyConditionExpression": Key("userId").eq(str(user_id)),

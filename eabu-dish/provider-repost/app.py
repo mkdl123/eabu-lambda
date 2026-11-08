@@ -68,6 +68,21 @@ def lambda_handler(event, context):
     if denied:
         return denied
 
+    # Reviving an expired listing counts as a new post toward the monthly limit; reposting
+    # one that is still live doesn't (it is already counted).
+    try:
+        current = table.get_item(Key={"zipcode": zipcode, "ID": item_id},
+                                 ProjectionExpression="userId, createdAt").get("Item")
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to look up listing")
+        return helpers._response(500, {"msg": "Failed to update item"})
+    if not current or (helpers.auth_enforced() and current.get("userId") != helpers.get_caller_id(event)):
+        return helpers._response(404, {"msg": f"No item found for itemId={item_id}"})
+    if str(current.get("createdAt", "")) < helpers.post_limit_cutoff():
+        limited = helpers.post_limit_reached(table, current.get("userId"))
+        if limited:
+            return limited
+
     # Only the owner of a listing may repost it.
     condition = "attribute_exists(ID)"
     values = {":createdAt": created_at}
