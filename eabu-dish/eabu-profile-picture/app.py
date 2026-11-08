@@ -1,11 +1,11 @@
-"""Optional profile selfie: upload (replacing any earlier one) or delete.
+"""Optional profile picture: upload (replacing any earlier one) or delete.
 
-POST   /identity            body {"user_id", "selfie": <base64 image>}
-DELETE /identity/{userId}
+POST   /profile-picture            body {"user_id", "picture": <base64 image>}
+DELETE /profile-picture/{userId}
 
-Each user has at most one selfie, stored at {userId}/selfie.jpg. The bucket is not
-versioned, so an upload overwrites the previous selfie and a delete removes it for good.
-No other images are accepted or stored.
+Each user has at most one profile picture, stored at {userId}/profile.jpg. The bucket is
+not versioned, so an upload overwrites the previous picture and a delete removes it for
+good. No other images are accepted or stored.
 """
 import json
 import os
@@ -97,12 +97,12 @@ def optimize_image(image_data: bytes, max_size: tuple = (1920, 1080)) -> bytes:
         logger.error("Image optimization failed: %s", e)
         raise ValueError("Image could not be processed")
 
-def selfie_key(user_id: str) -> str:
-    return f"{user_id}/selfie.jpg"
+def picture_key(user_id: str) -> str:
+    return f"{user_id}/profile.jpg"
 
 
 def _authorized_user_id(event, user_id):
-    """Return (user_id, None) when the caller may manage this user's selfie, else (None, response)."""
+    """Return (user_id, None) when the caller may manage this user's picture, else (None, response)."""
     if not isinstance(user_id, str) or not USER_ID_PATTERN.match(user_id) or ".." in user_id:
         return None, helpers._response(400, {"msg": "Invalid user_id"})
     denied = helpers.authorize_user(event, user_id)
@@ -111,7 +111,7 @@ def _authorized_user_id(event, user_id):
     return user_id, None
 
 
-def upload_selfie(event):
+def upload_picture(event):
     if not event.get('body'):
         return helpers._response(400, {"msg": "Request body is required"})
     try:
@@ -125,36 +125,35 @@ def upload_selfie(event):
     if denied:
         return denied
 
-    # Any other fields (older app versions also sent licence images) are ignored, never stored.
-    base64_data = body.get('selfie')
+    base64_data = body.get('picture')
     if not isinstance(base64_data, str) or not base64_data:
-        return helpers._response(400, {"msg": "selfie is required"})
+        return helpers._response(400, {"msg": "picture is required"})
     try:
-        image_data = optimize_image(validate_image_base64(base64_data, 'selfie'))
+        image_data = optimize_image(validate_image_base64(base64_data, 'picture'), max_size=(1024, 1024))
     except ValueError:
-        return helpers._response(400, {"msg": "Error processing selfie"})
+        return helpers._response(400, {"msg": "Error processing picture"})
 
     try:
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=selfie_key(user_id), Body=image_data,
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=picture_key(user_id), Body=image_data,
                              ContentType='image/jpeg')
     except (BotoCoreError, ClientError):
-        logger.exception("Failed to upload selfie")
-        return helpers._response(500, {"msg": "Failed to upload selfie"})
+        logger.exception("Failed to upload profile picture")
+        return helpers._response(500, {"msg": "Failed to upload picture"})
 
-    return helpers._response(200, {"message": "Selfie saved", "userId": user_id})
+    return helpers._response(200, {"message": "Profile picture saved", "userId": user_id})
 
 
-def delete_selfie(event):
+def delete_picture(event):
     user_id, denied = _authorized_user_id(event, (event.get('pathParameters') or {}).get('userId'))
     if denied:
         return denied
     try:
-        # Succeeds whether or not a selfie exists, so deleting twice is harmless.
-        s3_client.delete_object(Bucket=BUCKET_NAME, Key=selfie_key(user_id))
+        # Succeeds whether or not a picture exists, so deleting twice is harmless.
+        s3_client.delete_object(Bucket=BUCKET_NAME, Key=picture_key(user_id))
     except (BotoCoreError, ClientError):
-        logger.exception("Failed to delete selfie")
-        return helpers._response(500, {"msg": "Failed to delete selfie"})
-    return helpers._response(200, {"message": "Selfie deleted", "userId": user_id})
+        logger.exception("Failed to delete profile picture")
+        return helpers._response(500, {"msg": "Failed to delete picture"})
+    return helpers._response(200, {"message": "Profile picture deleted", "userId": user_id})
 
 
 @helpers.cors
@@ -162,9 +161,9 @@ def lambda_handler(event, context):
     try:
         method = (event.get('httpMethod') or '').upper()
         if method == 'DELETE':
-            return delete_selfie(event)
+            return delete_picture(event)
         if method == 'POST':
-            return upload_selfie(event)
+            return upload_picture(event)
         return helpers._response(405, {"msg": "Method not allowed"})
     except Exception:
         logger.exception("Lambda execution failed")

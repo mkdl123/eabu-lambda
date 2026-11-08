@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle routes, and the
-# selfie delete route). Each route gets the Cognito authorizer, a Lambda proxy integration
-# and a mock OPTIONS for CORS, like the existing routes.
+# Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle and profile
+# picture routes). Each route gets the Cognito authorizer, a Lambda proxy integration and
+# a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
+# RETIRED_ROUTES (the old identity/selfie upload).
 #
 #   ./scripts/create-api-routes.sh            # report only, changes nothing
 #   ./scripts/create-api-routes.sh --apply    # create missing routes (not live yet)
@@ -41,7 +42,14 @@ ROUTES=(
   "POST /offer-lifestyle LifestyleOfferFunction"
   "GET /offer-lifestyle/{userId}/{itemId} ConsumerReceivedLifestyleOfferFunction"
   "GET /provider-my-lifestyle-services/{userId} ProviderMyLifestyleServicesFunction"
-  "DELETE /identity/{userId} ProviderUploadIdentityPictures"
+  "POST /profile-picture EabuProfilePictureFunction"
+  "DELETE /profile-picture/{userId} EabuProfilePictureFunction"
+)
+
+# method  path  - methods to remove (their function no longer exists)
+RETIRED_ROUTES=(
+  "POST /identity"
+  "DELETE /identity/{userId}"
 )
 
 resource_id() { # path -> id, or empty when the resource does not exist
@@ -112,7 +120,13 @@ if [[ "$MODE" == "report" ]]; then
     if [[ -n "$id" ]] && has_method "$id" "$method"; then echo "ok       $method $path"
     else echo "missing  $method $path"; fi
   done
-  echo "Report only. Re-run with --apply to create missing routes."
+  for route in "${RETIRED_ROUTES[@]}"; do
+    read -r method path <<< "$route"
+    id=$(resource_id "$path")
+    if [[ -n "$id" ]] && has_method "$id" "$method"; then echo "retire   $method $path"
+    else echo "gone     $method $path"; fi
+  done
+  echo "Report only. Re-run with --apply to create missing routes and remove retired ones."
   exit 0
 fi
 
@@ -153,4 +167,15 @@ for route in "${ROUTES[@]}"; do
   echo "created  $method $path"
 done
 
-echo "Routes created but not live yet. Run $0 --deploy to publish them."
+for route in "${RETIRED_ROUTES[@]}"; do
+  read -r method path <<< "$route"
+  id=$(resource_id "$path")
+  if [[ -n "$id" ]] && has_method "$id" "$method"; then
+    api delete-method --rest-api-id "$API_ID" --resource-id "$id" --http-method "$method" >/dev/null
+    echo "removed  $method $path"
+  else
+    echo "gone     $method $path"
+  fi
+done
+
+echo "Changes are not live yet. Run $0 --deploy to publish them."

@@ -162,8 +162,7 @@ HTML_PAGE = """<!doctype html>
         </p>
 
         <p>
-          Buyers and sellers can add an optional <strong>selfie</strong> to their profile, which they can replace or delete at any time,
-          so the people they deal with know who to expect.
+          Buyers and sellers can add an optional <strong>profile picture</strong>, which they can replace or delete at any time.
         </p>
       </section>
 

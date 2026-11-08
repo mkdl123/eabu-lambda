@@ -1,7 +1,7 @@
-"""GET /eabu-user/{pUserId}: a short-lived link to the user's optional selfie.
+"""GET /eabu-user/{pUserId}: a short-lived link to the user's optional profile picture.
 
-Returns {"url": "<presigned link>"} when the user has a selfie and {"url": null} when
-they have none (it is optional, and they may have deleted it).
+Returns {"url": "<presigned link>"} when the user has a profile picture and {"url": null}
+when they have none (it is optional, and they may have deleted it).
 """
 import logging
 import os
@@ -15,7 +15,7 @@ s3 = boto3.client("s3")
 BUCKET = os.environ.get("IDENTITY_BUCKET_NAME", "eabu-identity-pictures")
 
 
-def _selfie_exists(key):
+def _picture_exists(key):
     try:
         s3.head_object(Bucket=BUCKET, Key=key)
         return True
@@ -35,10 +35,10 @@ def lambda_handler(event, context):
     userid = (event.get("pathParameters") or {}).get("pUserId")
     if not userid:
         return helpers._response(400, {"msg": "pUserId is required"})
-    key = f"{userid}/selfie.jpg"
+    key = f"{userid}/profile.jpg"
 
     try:
-        if not _selfie_exists(key):
+        if not _picture_exists(key):
             return helpers._response(200, {"url": None})
         url = s3.generate_presigned_url(
             ClientMethod="get_object",
@@ -47,5 +47,5 @@ def lambda_handler(event, context):
         )
         return helpers._response(200, {"url": url})
     except (BotoCoreError, ClientError):
-        logger.exception("Failed to look up selfie")
+        logger.exception("Failed to look up profile picture")
         return helpers._response(500, {"msg": "Failed to generate presigned URL"})

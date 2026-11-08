@@ -88,7 +88,7 @@ The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new 
 
 ### S3
 
-- `eabu-identity-pictures` — stores each user's optional selfie at `{userId}/selfie.jpg` (one per user; the bucket is unversioned, so a new upload replaces the old one). `eabu-identity` handles `POST /identity` (upload/replace) and `DELETE /identity/{userId}`; no other identity images are collected. The `eabu-user` function generates presigned GET URLs from this bucket.
+- `eabu-identity-pictures` — despite the name, now stores only each user's optional profile picture at `{userId}/profile.jpg` (one per user; the bucket is unversioned, so a new upload replaces the old one). `eabu-profile-picture` handles `POST /profile-picture` (upload/replace) and `DELETE /profile-picture/{userId}`; no identity images (selfies, licences) are collected. The `eabu-user` function generates presigned GET URLs from this bucket.
 
 ### Notification pattern
 

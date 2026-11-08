@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Harden the S3 bucket that stores users' optional selfies (it also held driver's licence
-# images until licence uploads were removed).
+# Harden the S3 bucket that stores users' optional profile pictures (it held identity
+# selfies and driver's licence images until those uploads were removed).
 #
 # Designed to run in AWS CloudShell (AWS CLI + python3 preinstalled).
 #
 #   ./scripts/harden-identity-bucket.sh                      # report only, changes nothing
 #   ./scripts/harden-identity-bucket.sh --apply              # apply the bucket hardening
 #   ./scripts/harden-identity-bucket.sh --apply --log-retention-days 30 --stack eabulambda
-#       also sets CloudWatch retention on the identity-upload function's log group.
+#       also sets CloudWatch retention on the profile-picture function's log group.
 #       WARNING: shortening retention permanently deletes older log events. That is the
 #       intent here (old logs contain base64 license images), but it cannot be undone.
 #
@@ -28,7 +28,7 @@ BUCKET="eabu-identity-pictures"
 APPLY=false
 LOG_DAYS=""
 STACK=""
-LOG_FUNCTION_LOGICAL_ID="ProviderUploadIdentityPictures"
+LOG_FUNCTION_LOGICAL_ID="EabuProfilePictureFunction"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

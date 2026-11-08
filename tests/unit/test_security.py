@@ -74,64 +74,71 @@ def jpeg_b64(size=(64, 64)):
 
 
 @mock_aws
-def test_selfie_upload_replace_delete():
+def test_profile_picture_upload_replace_delete():
     s3 = boto3.client("s3", region_name="us-east-1"); s3.create_bucket(Bucket="eabu-identity-pictures")
-    m = load("eabu-identity")
+    m = load("eabu-profile-picture")
     keys = lambda: sorted(o["Key"] for o in s3.list_objects_v2(Bucket="eabu-identity-pictures").get("Contents", []))
-    selfie = lambda uid="user123": s3.get_object(Bucket="eabu-identity-pictures", Key=f"{uid}/selfie.jpg")["Body"].read()
+    picture = lambda uid="user123": s3.get_object(Bucket="eabu-identity-pictures", Key=f"{uid}/profile.jpg")["Body"].read()
+    up = lambda uid, img: post({"user_id": uid, "picture": img})
 
-    res = m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64()}), None)
-    check("selfie-only upload accepted", res["statusCode"] == 200)
-    check("only the selfie is stored", keys() == ["user123/selfie.jpg"])
+    res = m.lambda_handler(up("user123", jpeg_b64()), None)
+    check("upload accepted", res["statusCode"] == 200)
+    check("only the profile picture is stored", keys() == ["user123/profile.jpg"])
     check("response hides bucket name", "eabu-identity-pictures" not in res["body"])
 
-    # Older app versions still send licence images: they must be ignored, never stored.
+    # The old identity payload (selfie + licence images) must not store anything.
     res = m.lambda_handler(post({"user_id": "old", "selfie": jpeg_b64(), "license_front": jpeg_b64(),
-                                 "license_back": jpeg_b64(), "address": "1 Main"}), None)
-    check("old-app payload accepted", res["statusCode"] == 200)
-    check("licence images never stored", not any("license" in k for k in keys()))
+                                 "license_back": jpeg_b64()}), None)
+    check("old identity payload rejected", res["statusCode"] == 400)
+    check("no selfie or licence stored", not any(k.startswith("old/") for k in keys()))
 
-    first = selfie()
-    res = m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64((32, 32))}), None)
-    check("re-upload replaces the selfie", res["statusCode"] == 200 and selfie() != first)
-    check("still exactly one selfie for the user", [k for k in keys() if k.startswith("user123/")] == ["user123/selfie.jpg"])
+    first = picture()
+    res = m.lambda_handler(up("user123", jpeg_b64((32, 32))), None)
+    check("re-upload replaces the picture", res["statusCode"] == 200 and picture() != first)
+    check("still exactly one picture for the user", [k for k in keys() if k.startswith("user123/")] == ["user123/profile.jpg"])
 
-    check("missing selfie -> 400", m.lambda_handler(post({"user_id": "u9"}), None)["statusCode"] == 400)
-    check("non-image -> 400", m.lambda_handler(post({"user_id": "u9", "selfie": base64.b64encode(b"<?php evil ?>").decode()}), None)["statusCode"] == 400)
+    big = io.BytesIO(); Image.new("RGB", (3000, 2000)).save(big, format="JPEG")
+    m.lambda_handler(up("big", base64.b64encode(big.getvalue()).decode()), None)
+    check("large pictures shrunk to 1024px", max(Image.open(io.BytesIO(picture("big"))).size) <= 1024)
+
+    check("missing picture -> 400", m.lambda_handler(post({"user_id": "u9"}), None)["statusCode"] == 400)
+    check("non-image -> 400", m.lambda_handler(up("u9", base64.b64encode(b"<?php evil ?>").decode()), None)["statusCode"] == 400)
     gif = io.BytesIO(); Image.new("RGB", (8, 8)).save(gif, format="GIF")
-    check("disallowed format (GIF) -> 400", m.lambda_handler(post({"user_id": "u9", "selfie": base64.b64encode(gif.getvalue()).decode()}), None)["statusCode"] == 400)
-    check("path traversal user_id -> 400", m.lambda_handler(post({"user_id": "../x", "selfie": jpeg_b64()}), None)["statusCode"] == 400)
+    check("disallowed format (GIF) -> 400", m.lambda_handler(up("u9", base64.b64encode(gif.getvalue()).decode()), None)["statusCode"] == 400)
+    check("path traversal user_id -> 400", m.lambda_handler(up("../x", jpeg_b64()), None)["statusCode"] == 400)
     check("rejected uploads store nothing", not any(k.startswith("u9/") for k in keys()))
 
     delete = lambda uid: {"httpMethod": "DELETE", "pathParameters": {"userId": uid}}
+    m.lambda_handler(up("other", jpeg_b64()), None)
     res = m.lambda_handler(delete("user123"), None)
-    check("delete succeeds", res["statusCode"] == 200 and "user123/selfie.jpg" not in keys())
+    check("delete succeeds", res["statusCode"] == 200 and "user123/profile.jpg" not in keys())
     check("deleting again is harmless", m.lambda_handler(delete("user123"), None)["statusCode"] == 200)
-    check("other users' selfies untouched", "old/selfie.jpg" in keys())
-    check("can upload again after delete", m.lambda_handler(post({"user_id": "user123", "selfie": jpeg_b64()}), None)["statusCode"] == 200)
+    check("other users' pictures untouched", "other/profile.jpg" in keys())
+    check("can upload again after delete", m.lambda_handler(up("user123", jpeg_b64()), None)["statusCode"] == 200)
     check("unsupported method -> 405", m.lambda_handler({"httpMethod": "GET"}, None)["statusCode"] == 405)
 
     os.environ["AUTH_MODE"] = "enforce"
     try:
-        check("[enforce] upload for someone else -> 403",
-              m.lambda_handler(as_user(post({"user_id": "old", "selfie": jpeg_b64()}), "mallory"), None)["statusCode"] == 403)
-        check("[enforce] delete someone else's selfie -> 403", m.lambda_handler(as_user(delete("old"), "mallory"), None)["statusCode"] == 403)
-        check("[enforce] unauthenticated delete -> 401", m.lambda_handler(delete("old"), None)["statusCode"] == 401)
-        check("[enforce] rejected delete leaves selfie", "old/selfie.jpg" in keys())
-        check("[enforce] owner can delete", m.lambda_handler(as_user(delete("old"), "old"), None)["statusCode"] == 200 and "old/selfie.jpg" not in keys())
+        check("[enforce] upload for someone else -> 403", m.lambda_handler(as_user(up("other", jpeg_b64()), "mallory"), None)["statusCode"] == 403)
+        check("[enforce] delete someone else's picture -> 403", m.lambda_handler(as_user(delete("other"), "mallory"), None)["statusCode"] == 403)
+        check("[enforce] unauthenticated delete -> 401", m.lambda_handler(delete("other"), None)["statusCode"] == 401)
+        check("[enforce] rejected delete leaves picture", "other/profile.jpg" in keys())
+        check("[enforce] owner can delete", m.lambda_handler(as_user(delete("other"), "other"), None)["statusCode"] == 200 and "other/profile.jpg" not in keys())
     finally:
         os.environ["AUTH_MODE"] = "off"
 
 
 @mock_aws
-def test_selfie_link_only_when_present():
+def test_profile_picture_link_only_when_present():
     s3 = boto3.client("s3", region_name="us-east-1"); s3.create_bucket(Bucket="eabu-identity-pictures")
     eu = load("eabu-user")
     get = lambda uid: json.loads(eu.lambda_handler({"pathParameters": {"pUserId": uid}}, None)["body"])
-    check("no selfie -> url is null", get("nobody") == {"url": None})
-    s3.put_object(Bucket="eabu-identity-pictures", Key="alice/selfie.jpg", Body=b"x")
+    check("no picture -> url is null", get("nobody") == {"url": None})
+    s3.put_object(Bucket="eabu-identity-pictures", Key="carol/selfie.jpg", Body=b"x")
+    check("an old selfie is never served", get("carol") == {"url": None})
+    s3.put_object(Bucket="eabu-identity-pictures", Key="alice/profile.jpg", Body=b"x")
     url = get("alice")["url"]
-    check("selfie -> presigned link to it", url and "alice/selfie.jpg" in url)
+    check("picture -> presigned link to it", url and "alice/profile.jpg" in url)
 
 
 @mock_aws
@@ -181,7 +188,7 @@ def test_auth():
     check("[enforce] identity-check unauthenticated -> 401", ic.lambda_handler({"pathParameters": {"userId": "alice"}}, None)["statusCode"] == 401)
 
     eu = load("eabu-user")
-    check("[enforce] selfie URL needs sign-in", eu.lambda_handler({"pathParameters": {"pUserId": "alice"}}, None)["statusCode"] == 401)
+    check("[enforce] profile picture URL needs sign-in", eu.lambda_handler({"pathParameters": {"pUserId": "alice"}}, None)["statusCode"] == 401)
 
     ur = load("eabu-update-ratings")
     rb = {"zipcode": "1", "ID": 5, "providerType": "eat", "totalstars": 5, "ratingscount": 1, "cUserId": "alice2"}
@@ -431,7 +438,7 @@ def test_auth_fails_closed_when_mode_is_missing():
         os.environ["AUTH_MODE"] = "off"
 
 
-CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-identity", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
+CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-profile-picture", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
     name.format(c) for c in ("eat", "live", "move")
     for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")] + [
     "provider-my-lifestyle-services"]

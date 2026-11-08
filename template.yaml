@@ -434,7 +434,7 @@ Resources:
               Action:
                 - s3:GetObject
               Resource:
-                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/selfie.jpg'
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
 
   EabuIdentityCheckFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -780,11 +780,12 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/*'
 
-  ProviderUploadIdentityPictures:
+  EabuProfilePictureFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      # Optional selfie only: POST /identity uploads or replaces it, DELETE /identity/{userId} removes it.
-      CodeUri: eabu-dish/eabu-identity
+      # Optional profile picture: POST /profile-picture uploads or replaces it,
+      # DELETE /profile-picture/{userId} removes it.
+      CodeUri: eabu-dish/eabu-profile-picture
       Handler: app.lambda_handler
       Policies:
         - Version: '2012-10-17'
@@ -794,7 +795,7 @@ Resources:
                 - s3:PutObject
                 - s3:DeleteObject
               Resource:
-                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/selfie.jpg'
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
 
   EabuAdvertisement:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
