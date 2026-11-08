@@ -438,7 +438,7 @@ def test_auth_fails_closed_when_mode_is_missing():
         os.environ["AUTH_MODE"] = "off"
 
 
-CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-profile-picture", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
+CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-profile-picture", "eabu-listing-picture", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
     name.format(c) for c in ("eat", "live", "move")
     for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")] + [
     "provider-my-lifestyle-services"]

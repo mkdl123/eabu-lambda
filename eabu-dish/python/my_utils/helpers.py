@@ -150,7 +150,44 @@ def is_owner(event, user_id) -> bool:
 # Listing fields anyone signed in may see on a seller's profile. Everything else
 # (phone, exact coordinates, interested_by, ...) is for the owner only.
 PUBLIC_LISTING_FIELDS = ("ID", "zipcode", "userId", "title", "description",
-                         "address", "totalstars", "ratingscount", "createdAt")
+                         "address", "picture1", "picture2", "pictures",
+                         "totalstars", "ratingscount", "createdAt")
+
+
+# Sellers may add up to two pictures to each service listing. They live in the
+# (private) picture bucket at listings/{category}/{ID}/{slot}.jpg, and the listing
+# row records each one as picture1/picture2 = upload time.
+LISTING_CATEGORIES = ("eat", "live", "move", "lifestyle")
+PICTURE_SLOTS = ("1", "2")
+PICTURE_URL_SECONDS = 3600
+_s3_client = None
+
+
+def listing_picture_key(category: str, item_id, slot: str) -> str:
+    return f"listings/{category}/{int(item_id)}/{slot}.jpg"
+
+
+def attach_picture_urls(items, category: str):
+    """Add "pictures": [{"slot", "url"}] (short-lived links) to listings that have pictures."""
+    global _s3_client
+    bucket = os.environ.get("IDENTITY_BUCKET_NAME", "eabu-identity-pictures")
+    for item in items:
+        slots = [slot for slot in PICTURE_SLOTS if item.get(f"picture{slot}")]
+        if not slots or "ID" not in item:
+            continue
+        if _s3_client is None:
+            _s3_client = boto3.client("s3", region_name=os.environ.get("REGION_NAME", "us-east-1"))
+        try:
+            item["pictures"] = [{
+                "slot": slot,
+                "url": _s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": listing_picture_key(category, item["ID"], slot)},
+                    ExpiresIn=PICTURE_URL_SECONDS),
+            } for slot in slots]
+        except (BotoCoreError, ClientError, TypeError, ValueError):
+            logger.exception("Could not sign listing picture links")
+    return items
 
 
 def optional_address(payload: dict):

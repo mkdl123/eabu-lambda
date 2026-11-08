@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle and profile
-# picture routes). Each route gets the Cognito authorizer, a Lambda proxy integration and
+# Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle, profile
+# picture and listing picture routes). Each route gets the Cognito authorizer, a Lambda proxy integration and
 # a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
 # RETIRED_ROUTES (the old identity/selfie upload).
 #
@@ -44,6 +44,8 @@ ROUTES=(
   "GET /provider-my-lifestyle-services/{userId} ProviderMyLifestyleServicesFunction"
   "POST /profile-picture EabuProfilePictureFunction"
   "DELETE /profile-picture/{userId} EabuProfilePictureFunction"
+  "POST /listing-picture EabuListingPictureFunction"
+  "DELETE /listing-picture/{category}/{zipcode}/{itemId}/{slot} EabuListingPictureFunction"
 )
 
 # method  path  - methods to remove (their function no longer exists)

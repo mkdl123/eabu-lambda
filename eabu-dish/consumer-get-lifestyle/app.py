@@ -49,9 +49,11 @@ def lambda_handler(event, context):
                                          ":ID": 0}
         )
 
+        result = helpers.query_result(response)
+        helpers.attach_picture_urls(result.get("Items", []), "lifestyle")
         return {
             'statusCode': 200,
-            'body': json.dumps(helpers.query_result(response), default=decimal_serializer)
+            'body': json.dumps(result, default=decimal_serializer)
         }
 
     except Exception as e:

@@ -74,6 +74,7 @@ def lambda_handler(event, context):
 
 
         result = helpers.query_result(response)
+        helpers.attach_picture_urls(result.get("Items", []), "live")
         if not is_owner:
             result["Items"] = helpers.public_listings(result.get("Items", []))
 
