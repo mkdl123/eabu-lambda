@@ -2,7 +2,8 @@
 # Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle, profile
 # picture, listing picture and favourites routes). Each route gets the Cognito authorizer, a Lambda proxy integration and
 # a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
-# RETIRED_ROUTES (the old identity/selfie upload).
+# RETIRED_ROUTES (the old identity/selfie upload and the
+# old follow feature, replaced by favourites).
 #
 #   ./scripts/create-api-routes.sh            # report only, changes nothing
 #   ./scripts/create-api-routes.sh --apply    # create missing routes (not live yet)
@@ -56,6 +57,8 @@ ROUTES=(
 RETIRED_ROUTES=(
   "POST /identity"
   "DELETE /identity/{userId}"
+  "POST /eabu-follow"
+  "GET /eabu-i-follow/{cUserId}"
 )
 
 resource_id() { # path -> id, or empty when the resource does not exist

@@ -49,10 +49,6 @@ Globals:
           Ref: AdTableName
         AD_TABLE_REQ:
           Ref: AdTableReqName
-        FOLLOWERS_TABLE_NAME:
-          Ref: FollowersTableName
-        NOTIFICATION_FUNCTION_ARN:
-          Ref: NotificationFunctionArn
         AUTH_MODE:
           Ref: AuthMode
         AD_PUBLIC_STATUSES:
@@ -85,8 +81,6 @@ Globals:
     Timeout: 30
 
 Parameters:
-  NotificationFunctionArn:
-    Type: String
   AuthMode:
     Type: String
     Default: "enforce"
@@ -103,9 +97,6 @@ Parameters:
     Type: String
     Default: "cognito:username"
     Description: Cognito claim that holds the app's userId (usually "sub" or "cognito:username").
-  NotificationFunctionName:
-    Type: String
-    Default: EabuNotificationFunction
 
   EabuFeedbackTableName:
     Type: String
@@ -122,10 +113,6 @@ Parameters:
   EabuUserTableName:
     Type: String
     Default: eabu-users
-
-  FollowersTableName:
-    Type: String
-    Default: eabu-followers
 
   AdTableReqName:
     Type: String
@@ -938,28 +925,6 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
 
 
-
-  EabuNotificationFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-    Properties:
-      CodeUri: eabu-dish/eabu-notification
-      Handler: app.lambda_handler
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${FollowersTableName}'
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-              Resource:
-                - '*'
-              Condition:
-                StringEquals:
-                  ses:FromAddress: !Ref SenderEmail
 
   ProviderGetLifestyleFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

@@ -76,7 +76,7 @@ Every writable table stores a sentinel counter row at `{ID: 100, zipcode: '11111
 | `LIFESTYLE_{CONSUMER,PROVIDER,OFFER,INTERESTED,RATED}_TABLE_NAME` | `eabu-lifestyle-*` | Lifestyle requests, services, offers, interest and ratings |
 | `EABU_USER_TABLE_NAME` | `eabu-users` | User profiles |
 | `EABU_IDENTITY_TABLE_NAME` | `eabu-identity` | Identity verification records |
-| `FOLLOWERS_TABLE_NAME` | `eabu-followers` | Follow relationships (pUserId → cEmail) |
+| `FAVOURITES_TABLE_NAME` | `eabu-favourites` | Favourite sellers/buyers (userId + `kind#favUserId`) |
 | `EAT/LIVE/MOVE_INTERESTED_TABLE_NAME` | `eabu-*-interested` | Interest/bookmark records |
 | `EABU_FEEDBACK_TABLE_NAME` | `eabu-feedback` | User feedback submissions |
 
@@ -90,9 +90,9 @@ The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new 
 
 - `eabu-identity-pictures` — despite the name, now stores only each user's optional profile picture at `{userId}/profile.jpg` (one per user; the bucket is unversioned, so a new upload replaces the old one). `eabu-profile-picture` handles `POST /profile-picture` (upload/replace) and `DELETE /profile-picture/{userId}`; no identity images (selfies, licences) are collected. The `eabu-user` function generates presigned GET URLs from this bucket.
 
-### Notification pattern
+### Favourites
 
-`eabu-notification/app.py` is invoked asynchronously (via `NOTIFICATION_FUNCTION_ARN`) by provider-post functions. It reads follower emails from `eabu-followers` (keyed on `pUserId`) and sends SES emails from `eabu@eabu.net`.
+`eabu-favourites` lets buyers save sellers (kind `seller`) and sellers save buyers (kind `buyer`), up to 50 each. `GET /favourites-feed/{userId}/{kind}?zip=` returns the favourites' posts from the last 30 days (posts in that ZIP first) for the app's Home screen; `GET /eabu-ad/{status}?zip=` limits ads to a ZIP. Favourites replaced the old follow feature: its code, the `eabu-notification` emails and the `/eabu-follow` routes were removed; the `eabu-followers` table is no longer used.
 
 ### Function naming conventions
 

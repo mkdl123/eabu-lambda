@@ -16,24 +16,15 @@ REQUIRED_FIELDS = ["zipcode", "title", "description", "phone", "userId", "latitu
 
 # Resolve environment configuration
 table_name = os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider")
-followers_table_name = os.environ.get("FOLLOWERS_TABLE_NAME", "eabu-followers")
 region = os.environ.get("REGION_NAME", "us-east-1")
-# notification_function_arn = os.environ.get(
-#     "NOTIFICATION_FUNCTION_ARN",
-#     "arn:aws:lambda:us-east-1:YOUR_ACCOUNT_ID:function:eabulambda-EabuNotificationFunction-E3SG0yF62GO4"
-# )
 
 # Initialize AWS resources (reuse across invocations if desired)
 dynamodb = boto3.resource("dynamodb", region_name=region)
 table = dynamodb.Table(table_name)
-followers_table = dynamodb.Table(followers_table_name)
-#ses = boto3.client('ses', region_name=region)
-lambda_client = boto3.client('lambda', region_name=region)
 
 
 def lambda_handler(event, context):
     logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
-    # print("Notification Function ARN: ", notification_function_arn)
     #Get new DishID
 
     # Ensure method and body are valid
