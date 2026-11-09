@@ -7,7 +7,7 @@ from my_utils import helpers
 import boto3
 from datetime import datetime
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -229,11 +229,20 @@ def lambda_handler(event, context):
             'body': json.dumps({'msg': 'Forbidden'})
         }
 
+    # Optional ?zip=12345 limits the ads to that ZIP code (the ad table is keyed on zipcode).
+    zip_code = str(((event.get('queryStringParameters') or {}).get('zip') or '')).strip()[:10]
+
     try:
-        response = table.query(
-            IndexName='status-index',
-            KeyConditionExpression=Key('status').eq(status)
-        )
+        if zip_code:
+            response = table.query(
+                KeyConditionExpression=Key('zipcode').eq(zip_code),
+                FilterExpression=Attr('status').eq(status),
+            )
+        else:
+            response = table.query(
+                IndexName='status-index',
+                KeyConditionExpression=Key('status').eq(status)
+            )
 
         items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in response.get('Items', [])]
         return {

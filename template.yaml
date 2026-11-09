@@ -73,6 +73,8 @@ Globals:
           Ref: LifestyleInterestedTableName
         LIFESTYLE_RATED_TABLE_NAME:
           Ref: LifestyleRatedTableName
+        FAVOURITES_TABLE_NAME:
+          Ref: FavouritesTableName
         IDENTITY_BUCKET_NAME:
           Ref: IdentityBucketName
         SENDER_EMAIL:
@@ -200,6 +202,9 @@ Parameters:
   LifestyleRatedTableName:
     Type: String
     Default: eabu-lifestyle-rated
+  FavouritesTableName:
+    Type: String
+    Default: eabu-favourites
   IdentityBucketName:
     Type: String
     Default: eabu-identity-pictures
@@ -864,6 +869,40 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+
+  EabuFavouritesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Favourite sellers/buyers: list, add, remove, and a feed of their current posts.
+      CodeUri: eabu-dish/eabu-favourites
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${FavouritesTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}/index/userId-index'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
 
   EabuAdvertisement:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
