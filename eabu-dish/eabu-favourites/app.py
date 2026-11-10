@@ -4,7 +4,11 @@ GET    /favourites/{userId}/{kind}                 the user's favourites of that
 POST   /favourites                                 body {"userId", "kind", "favUserId"}
 DELETE /favourites/{userId}/{kind}/{favUserId}
 GET    /favourites-feed/{userId}/{kind}?zip=12345  current posts (last 30 days) by those favourites
-                                                   within 25 miles of ?zip (all of them without ?zip)
+                                                   within 50 miles of ?zip (all of them without ?zip)
+GET    /favourites-feed/{userId}/{kind}?zip=12345&nearby=1
+                                                   everyone's current posts of that kind within 50 miles
+                                                   of ?zip (not the user's own), favourites flagged with
+                                                   isFavourite
 
 kind is "seller" (a buyer's favourite sellers: their service listings) or "buyer" (a seller's
 favourite buyers: their requests). Favourites are private: only the user can read or change
@@ -36,6 +40,7 @@ USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_@.+:-]{1,128}$")
 CATEGORIES = ("eat", "live", "move", "lifestyle")
 # seller -> their service listings (provider tables); buyer -> their requests (consumer tables)
 ROLE_TABLE = {"seller": "PROVIDER", "buyer": "CONSUMER"}
+NEARBY_MAX_POSTS = 200
 FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "phone",
                "totalstars", "ratingscount", "createdAt", "picture1", "picture2")
 
@@ -142,6 +147,43 @@ def feed(event, user_id, kind):
     return _json(200, {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES if zip_code else None})
 
 
+def _recent_posts(table, cutoff):
+    """Every post in the table created since cutoff.
+    A scan is fine while the post tables are small. If they grow large, add a geohash GSI
+    and query the cells around the user instead (a 50-mile radius covers up to ~900 ZIPs,
+    so querying ZIP by ZIP isn't practical)."""
+    items, kwargs = [], {"FilterExpression": Attr("createdAt").gte(cutoff)}  # skips the counter row too
+    while True:
+        page = table.scan(**kwargs)
+        items += page.get("Items", [])
+        if "LastEvaluatedKey" not in page:
+            return items
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def nearby_feed(event, user_id, kind, zip_code):
+    """Everyone's current posts within NEARBY_MILES of zip_code, newest first, favourites flagged."""
+    denied = _check(event, user_id, kind)
+    if denied:
+        return denied
+    if not zip_code:
+        return helpers._response(400, {"msg": "zip is required"})
+    fav_ids = {f["favUserId"] for f in _list(user_id, kind)}
+    cutoff = helpers.post_limit_cutoff()
+    posts = []
+    for category in CATEGORIES:
+        found = [{k: i[k] for k in FEED_FIELDS if k in i}
+                 for i in _recent_posts(_table_for(kind, category), cutoff) if i.get("userId") != user_id]
+        found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
+        posts += [{**p, "category": category, "isFavourite": p.get("userId") in fav_ids} for p in found]
+    posts.sort(key=lambda p: str(p.get("createdAt", "")), reverse=True)
+    posts = posts[:NEARBY_MAX_POSTS]
+    if kind == "seller":
+        for category in CATEGORIES:
+            helpers.attach_picture_urls([p for p in posts if p["category"] == category], category)
+    return _json(200, {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES})
+
+
 @helpers.cors
 def lambda_handler(event, context):
     try:
@@ -153,6 +195,10 @@ def lambda_handler(event, context):
         if method == "DELETE":
             return remove_favourite(event, path.get("userId"), path.get("kind"), path.get("favUserId"))
         if method == "GET" and resource.startswith("/favourites-feed"):
+            query = event.get("queryStringParameters") or {}
+            if str(query.get("nearby") or "").lower() in ("1", "true", "yes"):
+                zip_code = str(query.get("zip") or "").strip()[:10]
+                return nearby_feed(event, path.get("userId"), path.get("kind"), zip_code)
             return feed(event, path.get("userId"), path.get("kind"))
         if method == "GET":
             return list_favourites(event, path.get("userId"), path.get("kind"))

@@ -1,4 +1,4 @@
-"""Favourite sellers/buyers, their feed, and ads within 25 miles of a ZIP."""
+"""Favourite sellers/buyers, their feed, and ads within 50 miles of a ZIP."""
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -97,10 +97,10 @@ def test_limit_of_50():
 
 
 @mock_aws
-def test_feed_shows_favourites_current_posts_within_25_miles():
+def test_feed_shows_favourites_current_posts_within_50_miles():
     tables, fn = setup()
     listing("eat", "provider", "s1", zip_code="19103")      # Philadelphia, ~18 miles from 19060
-    listing("live", "provider", "s1", zip_code="19030")     # ~42 miles: too far
+    listing("live", "provider", "s1", zip_code="08820")     # ~78 miles: too far
     near = listing("lifestyle", "provider", "s1")
     listing("move", "provider", "s2")                       # not a favourite
     listing("eat", "consumer", "s1")                        # s1's buyer request: not in the seller feed
@@ -114,7 +114,7 @@ def test_feed_shows_favourites_current_posts_within_25_miles():
     items = res["Items"]
     assert [(i["category"], i["zipcode"], i["distanceMiles"]) for i in items] == [
         ("lifestyle", ZIP, 0.0), ("eat", "19103", 18.3)], "newest first, far post left out"
-    assert res["radiusMiles"] == 25
+    assert res["radiusMiles"] == 50
     assert len(body(get(fn, "buyer", "seller", feed=True))["Items"]) == 3, "no ZIP: no distance filter"
     assert items[0]["pictures"][0]["slot"] == "1"
     assert "latitude" not in items[0] and "interested_by" not in items[0]
@@ -132,7 +132,35 @@ def test_seller_feed_of_favourite_buyers():
 
 
 @mock_aws
-def test_ads_can_be_limited_to_25_miles_of_a_zip():
+def test_nearby_feed_shows_everyones_posts_within_50_miles_and_flags_favourites():
+    tables, fn = setup()
+    listing("eat", "provider", "s1", zip_code="19103")       # favourite, ~18 miles
+    listing("live", "provider", "s2", zip_code="19030")      # not a favourite, ~42 miles
+    listing("move", "provider", "s3", zip_code="08820")      # ~78 miles: too far
+    listing("lifestyle", "provider", "buyer")                # the user's own post: left out
+    listing("eat", "consumer", "s2")                         # a buyer request: not in the seller feed
+    tables["live-provider"].put_item(Item={"zipcode": ZIP, "ID": 777, "userId": "s2", "title": "old",
+                                           "createdAt": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()})
+    add(fn, "buyer", "seller", "s1")
+
+    def nearby(user, kind, query):
+        event = {"httpMethod": "GET", "pathParameters": {"userId": user, "kind": kind},
+                 "resource": "/favourites-feed/{userId}/{kind}", "queryStringParameters": query}
+        return fn.lambda_handler(as_user(event, user), None)
+
+    res = body(nearby("buyer", "seller", {"zip": ZIP, "nearby": "1"}))
+    assert [(i["userId"], i["category"], i["isFavourite"], i["distanceMiles"]) for i in res["Items"]] == [
+        ("s2", "live", False, 41.6), ("s1", "eat", True, 18.3)], "newest first"
+    assert res["radiusMiles"] == 50
+    assert [i["userId"] for i in body(nearby("seller", "buyer", {"zip": ZIP, "nearby": "1"}))["Items"]] == ["s2"]
+    assert nearby("buyer", "seller", {"nearby": "1"})["statusCode"] == 400, "zip required"
+    other = {**{"httpMethod": "GET", "pathParameters": {"userId": "buyer", "kind": "seller"},
+                "resource": "/favourites-feed/{userId}/{kind}", "queryStringParameters": {"zip": ZIP, "nearby": "1"}}}
+    assert fn.lambda_handler(as_user(other, "intruder"), None)["statusCode"] == 403
+
+
+@mock_aws
+def test_ads_can_be_limited_to_50_miles_of_a_zip():
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     ads = ddb.create_table(TableName="eabu-advertisement", BillingMode="PAY_PER_REQUEST",
                            KeySchema=[{"AttributeName": "zipcode", "KeyType": "HASH"}, {"AttributeName": "ID", "KeyType": "RANGE"}],

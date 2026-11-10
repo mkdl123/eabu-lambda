@@ -314,7 +314,7 @@ def increment_counter_with(sort_key_initial_value, table, partitionkey,counter_a
 # ---------------------------------------------------------------------------
 # Distance between ZIP codes (Home feed and ads "near me")
 # ---------------------------------------------------------------------------
-NEARBY_MILES = 25
+NEARBY_MILES = 50
 _ZIP_CENTROIDS = None
 
 
