@@ -2,6 +2,8 @@ import os
 import json
 import base64
 import functools
+import math
+import re
 import logging
 from datetime import datetime, timezone
 import boto3
@@ -307,3 +309,75 @@ def increment_counter_with(sort_key_initial_value, table, partitionkey,counter_a
     )
     return response['Attributes'][counter_attribute]
 
+
+
+# ---------------------------------------------------------------------------
+# Distance between ZIP codes (Home feed and ads "near me")
+# ---------------------------------------------------------------------------
+NEARBY_MILES = 25
+_ZIP_CENTROIDS = None
+
+
+def _zip_centroids():
+    """{zip: (lat, lon)} from the bundled Census ZCTA file, loaded once per container."""
+    global _ZIP_CENTROIDS
+    if _ZIP_CENTROIDS is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zip_centroids.csv")
+        table = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("#"):
+                        continue
+                    z, lat, lon = line.rstrip("\n").split(",")
+                    table[z] = (float(lat), float(lon))
+        except OSError:
+            logger.exception("ZIP centroid file missing; distance filtering falls back to exact ZIP")
+        _ZIP_CENTROIDS = table
+    return _ZIP_CENTROIDS
+
+
+_US_ZIP = re.compile(r"^(\d{5})(?:-\d{4})?$")
+
+
+def _norm_zip(zip_code):
+    """The 5-digit ZIP from '12345' or '12345-6789'; None for anything else (e.g. a 6-digit PIN)."""
+    m = _US_ZIP.match(str(zip_code or "").strip())
+    return m.group(1) if m else None
+
+
+def zip_distance_miles(zip_a, zip_b):
+    """Straight-line miles between two US ZIP centroids, or None if either is unknown.
+    The same code is always 0, even if it isn't in the centroid file (PO-box ZIPs, non-US codes)."""
+    raw_a, raw_b = str(zip_a or "").strip(), str(zip_b or "").strip()
+    if raw_a and raw_a == raw_b:
+        return 0.0
+    a, b = _norm_zip(raw_a), _norm_zip(raw_b)
+    if not a or not b:
+        return None
+    if a == b:
+        return 0.0
+    table = _zip_centroids()
+    if a not in table or b not in table:
+        return None
+    (lat1, lon1), (lat2, lon2) = table[a], table[b]
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def is_known_zip(zip_code):
+    z = _norm_zip(zip_code)
+    return bool(z) and z in _zip_centroids()
+
+
+def within_miles(origin_zip, items, miles=NEARBY_MILES, zip_field="zipcode"):
+    """Items whose ZIP is within `miles` of origin_zip, each with a `distanceMiles` (1 decimal).
+    If origin_zip isn't in the centroid file, only items in that exact ZIP are kept."""
+    kept = []
+    for item in items:
+        d = zip_distance_miles(origin_zip, item.get(zip_field))
+        if d is not None and d <= miles:
+            kept.append({**item, "distanceMiles": round(d, 1)})
+    return kept

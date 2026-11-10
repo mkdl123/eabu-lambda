@@ -4,10 +4,11 @@ GET    /favourites/{userId}/{kind}                 the user's favourites of that
 POST   /favourites                                 body {"userId", "kind", "favUserId"}
 DELETE /favourites/{userId}/{kind}/{favUserId}
 GET    /favourites-feed/{userId}/{kind}?zip=12345  current posts (last 30 days) by those favourites
+                                                   within 25 miles of ?zip (all of them without ?zip)
 
 kind is "seller" (a buyer's favourite sellers: their service listings) or "buyer" (a seller's
 favourite buyers: their requests). Favourites are private: only the user can read or change
-their own. Feed posts in ?zip come first, then the rest, newest first.
+their own. Feed posts are newest first, each with distanceMiles from ?zip.
 """
 import json
 import logging
@@ -135,9 +136,10 @@ def feed(event, user_id, kind):
                 if "LastEvaluatedKey" not in page:
                     break
                 kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    if zip_code:
+        posts = helpers.within_miles(zip_code, posts, helpers.NEARBY_MILES)
     posts.sort(key=lambda p: str(p.get("createdAt", "")), reverse=True)
-    posts.sort(key=lambda p: 0 if zip_code and str(p.get("zipcode")) == zip_code else 1)
-    return _json(200, {"Items": posts, "Count": len(posts)})
+    return _json(200, {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES if zip_code else None})
 
 
 @helpers.cors

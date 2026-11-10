@@ -92,7 +92,7 @@ The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new 
 
 ### Favourites
 
-`eabu-favourites` lets buyers save sellers (kind `seller`) and sellers save buyers (kind `buyer`), up to 50 each. `GET /favourites-feed/{userId}/{kind}?zip=` returns the favourites' posts from the last 30 days (posts in that ZIP first) for the app's Home screen; `GET /eabu-ad/{status}?zip=` limits ads to a ZIP. Favourites replaced the old follow feature: its code, the `eabu-notification` emails and the `/eabu-follow` routes were removed; the `eabu-followers` table was deleted on 2026-11-08.
+`eabu-favourites` lets buyers save sellers (kind `seller`) and sellers save buyers (kind `buyer`), up to 50 each. `GET /favourites-feed/{userId}/{kind}?zip=` returns the favourites' posts from the last 30 days within 25 miles of that ZIP (newest first, each with `distanceMiles`) for the app's Home screen; `GET /eabu-ad/{status}?zip=` limits ads to advertisers within 25 miles. Distances come from `helpers.zip_distance_miles` / `helpers.within_miles`, which use the Census ZIP centroids bundled in the layer (`python/my_utils/zip_centroids.csv`); an unknown or non-US code only matches itself. The app mixes the ads into the favourites list at random positions. Favourites replaced the old follow feature: its code, the `eabu-notification` emails and the `/eabu-follow` routes were removed; the `eabu-followers` table was deleted on 2026-11-08.
 
 ### Function naming conventions
 

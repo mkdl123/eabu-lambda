@@ -1,4 +1,4 @@
-"""Favourite sellers/buyers, their feed, and ads filtered by ZIP."""
+"""Favourite sellers/buyers, their feed, and ads within 25 miles of a ZIP."""
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -97,9 +97,10 @@ def test_limit_of_50():
 
 
 @mock_aws
-def test_feed_shows_favourites_current_posts_my_zip_first():
+def test_feed_shows_favourites_current_posts_within_25_miles():
     tables, fn = setup()
-    listing("eat", "provider", "s1", zip_code="19030")
+    listing("eat", "provider", "s1", zip_code="19103")      # Philadelphia, ~18 miles from 19060
+    listing("live", "provider", "s1", zip_code="19030")     # ~42 miles: too far
     near = listing("lifestyle", "provider", "s1")
     listing("move", "provider", "s2")                       # not a favourite
     listing("eat", "consumer", "s1")                        # s1's buyer request: not in the seller feed
@@ -109,8 +110,12 @@ def test_feed_shows_favourites_current_posts_my_zip_first():
         {"category": "lifestyle", "zipcode": ZIP, "itemId": near, "slot": "1", "picture": jpeg_b64()}), "s1"), None)
     add(fn, "buyer", "seller", "s1")
 
-    items = body(get(fn, "buyer", "seller", feed=True, zip_code=ZIP))["Items"]
-    assert [(i["category"], i["zipcode"]) for i in items] == [("lifestyle", ZIP), ("eat", "19030")]
+    res = body(get(fn, "buyer", "seller", feed=True, zip_code=ZIP))
+    items = res["Items"]
+    assert [(i["category"], i["zipcode"], i["distanceMiles"]) for i in items] == [
+        ("lifestyle", ZIP, 0.0), ("eat", "19103", 18.3)], "newest first, far post left out"
+    assert res["radiusMiles"] == 25
+    assert len(body(get(fn, "buyer", "seller", feed=True))["Items"]) == 3, "no ZIP: no distance filter"
     assert items[0]["pictures"][0]["slot"] == "1"
     assert "latitude" not in items[0] and "interested_by" not in items[0]
 
@@ -127,7 +132,7 @@ def test_seller_feed_of_favourite_buyers():
 
 
 @mock_aws
-def test_ads_can_be_limited_to_a_zip():
+def test_ads_can_be_limited_to_25_miles_of_a_zip():
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     ads = ddb.create_table(TableName="eabu-advertisement", BillingMode="PAY_PER_REQUEST",
                            KeySchema=[{"AttributeName": "zipcode", "KeyType": "HASH"}, {"AttributeName": "ID", "KeyType": "RANGE"}],
@@ -138,11 +143,17 @@ def test_ads_can_be_limited_to_a_zip():
                                                     "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}]}])
     ads.put_item(Item={"zipcode": "19060", "ID": 1, "status": "active", "title": "Here", "phone": "1"})
     ads.put_item(Item={"zipcode": "19060", "ID": 2, "status": "pending", "title": "Not yet"})
-    ads.put_item(Item={"zipcode": "08820", "ID": 3, "status": "active", "title": "Elsewhere"})
+    ads.put_item(Item={"zipcode": "08820", "ID": 3, "status": "active", "title": "Elsewhere"})   # ~78 miles
+    ads.put_item(Item={"zipcode": "19103", "ID": 4, "status": "active", "title": "Philly"})      # ~18 miles
+    ads.put_item(Item={"zipcode": "781301", "ID": 5, "status": "active", "title": "India"})      # not "78130" (Texas)
     fn = load("eabu-advertisement-get")
     get_ads = lambda q=None: json.loads(fn.lambda_handler(
         {"httpMethod": "GET", "pathParameters": {"status": "active"}, "queryStringParameters": q}, None)["body"])
-    assert sorted(a["title"] for a in get_ads()["Items"]) == ["Elsewhere", "Here"]
-    zip_ads = get_ads({"zip": "19060"})["Items"]
-    assert [a["title"] for a in zip_ads] == ["Here"] and "phone" not in zip_ads[0]
-    assert get_ads({"zip": "99999"})["Items"] == []
+    assert sorted(a["title"] for a in get_ads()["Items"]) == ["Elsewhere", "Here", "India", "Philly"]
+    near = {a["title"]: a for a in get_ads({"zip": "19060"})["Items"]}
+    assert sorted(near) == ["Here", "Philly"] and "phone" not in near["Here"]
+    assert near["Here"]["distanceMiles"] == 0.0 and near["Philly"]["distanceMiles"] == 18.3
+    assert get_ads({"zip": "99999"})["Items"] == [], "unknown ZIP: only exact matches"
+    assert [a["title"] for a in get_ads({"zip": "08820"})["Items"]] == ["Elsewhere"]
+    assert get_ads({"zip": "78130"})["Items"] == []
+    assert [a["title"] for a in get_ads({"zip": "781301"})["Items"]] == ["India"], "same non-US code still matches"

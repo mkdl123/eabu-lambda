@@ -229,25 +229,27 @@ def lambda_handler(event, context):
             'body': json.dumps({'msg': 'Forbidden'})
         }
 
-    # Optional ?zip=12345 limits the ads to that ZIP code (the ad table is keyed on zipcode).
+    # Optional ?zip=12345 limits the ads to advertisers within 25 miles of that ZIP.
     zip_code = str(((event.get('queryStringParameters') or {}).get('zip') or '')).strip()[:10]
 
     try:
-        if zip_code:
-            response = table.query(
-                KeyConditionExpression=Key('zipcode').eq(zip_code),
-                FilterExpression=Attr('status').eq(status),
-            )
-        else:
-            response = table.query(
-                IndexName='status-index',
-                KeyConditionExpression=Key('status').eq(status)
-            )
+        kwargs = {'IndexName': 'status-index', 'KeyConditionExpression': Key('status').eq(status)}
+        found = []
+        while True:
+            response = table.query(**kwargs)
+            found += response.get('Items', [])
+            if 'LastEvaluatedKey' not in response:
+                break
+            kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
 
-        items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in response.get('Items', [])]
+        items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in found]
+        if zip_code:
+            items = helpers.within_miles(zip_code, items, helpers.NEARBY_MILES)
         return {
             'statusCode': 200,
-            'body': json.dumps({'Items': items, 'Count': len(items)}, default=decimal_serializer)
+            'body': json.dumps({'Items': items, 'Count': len(items),
+                                'radiusMiles': helpers.NEARBY_MILES if zip_code else None},
+                               default=decimal_serializer)
         }
 
     except Exception as e:
