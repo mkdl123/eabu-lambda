@@ -159,6 +159,57 @@ def test_nearby_feed_shows_everyones_posts_within_50_miles_and_flags_favourites(
     assert fn.lambda_handler(as_user(other, "intruder"), None)["statusCode"] == 403
 
 
+def feed_call(fn, user, kind, query):
+    event = {"httpMethod": "GET", "pathParameters": {"userId": user, "kind": kind},
+             "resource": "/favourites-feed/{userId}/{kind}", "queryStringParameters": query}
+    return fn.lambda_handler(as_user(event, user), None)
+
+
+def put_posts(table, user, count, start_minutes_ago=1000, zip_code=ZIP, id_from=1):
+    now = datetime.now(timezone.utc)
+    for n in range(count):
+        table.put_item(Item={"zipcode": zip_code, "ID": id_from + n, "userId": user, "title": f"{user}-{n}",
+                             "createdAt": (now - timedelta(minutes=start_minutes_ago - n)).isoformat()})
+
+
+@mock_aws
+def test_nearby_feed_pages_with_a_cursor():
+    tables, fn = setup()
+    put_posts(tables["eat-provider"], "s1", 4)
+    put_posts(tables["live-provider"], "s2", 3, start_minutes_ago=500)
+    full = [(i["category"], i["ID"]) for i in body(feed_call(fn, "buyer", "seller", {"zip": ZIP, "nearby": "1"}))["Items"]]
+    assert len(full) == 7
+    assert "nextCursor" not in body(feed_call(fn, "buyer", "seller", {"zip": ZIP, "nearby": "1"})), "unchanged without limit"
+
+    seen, cursor, pages = [], None, 0
+    while True:
+        query = {"zip": ZIP, "nearby": "1", "limit": "3", **({"cursor": cursor} if cursor else {})}
+        res = body(feed_call(fn, "buyer", "seller", query))
+        seen += [(i["category"], i["ID"]) for i in res["Items"]]
+        pages += 1
+        if pages == 1:  # a new post arriving mid-scroll must not shift or repeat later pages
+            put_posts(tables["move-provider"], "s3", 1, start_minutes_ago=0)
+        cursor = res["nextCursor"]
+        if not cursor:
+            break
+    assert pages == 3 and seen == full, "every post once, newest first"
+
+    for bad in ({"limit": "0"}, {"limit": "51"}, {"limit": "x"}, {"limit": "3", "cursor": "%%%"},
+                {"cursor": "abc"}, {"limit": "3", "cursor": "WzFd"}):
+        assert feed_call(fn, "buyer", "seller", {"zip": ZIP, "nearby": "1", **bad})["statusCode"] == 400, bad
+
+
+@mock_aws
+def test_favourites_only_feed_pages_too():
+    tables, fn = setup()
+    put_posts(tables["eat-provider"], "s1", 5)
+    add(fn, "buyer", "seller", "s1")
+    first = body(feed_call(fn, "buyer", "seller", {"limit": "2"}))
+    assert [i["ID"] for i in first["Items"]] == [5, 4] and first["nextCursor"]
+    rest = body(feed_call(fn, "buyer", "seller", {"limit": "10", "cursor": first["nextCursor"]}))
+    assert [i["ID"] for i in rest["Items"]] == [3, 2, 1] and rest["nextCursor"] is None
+
+
 @mock_aws
 def test_ads_can_be_limited_to_50_miles_of_a_zip():
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
