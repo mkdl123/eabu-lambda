@@ -17,8 +17,6 @@ Globals:
           Ref: EabuDeleteTableName
         EABU_SERVICE_REQUEST_TABLE:
           Ref: EabuServiceRequestTableName
-        EABU_USER_TABLE_NAME:
-          Ref: EabuUserTableName
         EAT_INTERESTED_TABLE_NAME:
           Ref: EatInterestedTableName
         LIVE_INTERESTED_TABLE_NAME:
@@ -111,10 +109,6 @@ Parameters:
   EabuServiceRequestTableName:
     Type: String
     Default: eabu-service-request
-
-  EabuUserTableName:
-    Type: String
-    Default: eabu-users
 
   AdTableName:
     Type: String

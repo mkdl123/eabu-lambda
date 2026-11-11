@@ -21,7 +21,7 @@ s3_prefix = "eabulambda"
 region = "us-east-1"
 #disable_rollback = true
 image_repositories = []
-parameter_overrides = "AuthMode=\"enforce\" AuthUserIdClaim=\"cognito:username\" EabuUserTableName=\"eabu-users\" AdTableName=\"eabu-advertisement\" EatInterestedTableName=\"eabu-eat-interested\" LiveInterestedTableName=\"eabu-live-interested\" MoveInterestedTableName=\"eabu-move-interested\" MoveOfferTableName=\"eabu-move-offer\" LiveOfferTableName=\"eabu-live-offer\" EatOfferTableName=\"eabu-eat-offer\" EabuIdentityTableName=\"eabu-identity\" EatConsumerTableName=\"eabu-eat-consumer\" LiveConsumerTableName=\"eabu-live-consumer\" MoveConsumerTableName=\"eabu-move-consumer\" EatProviderTableName=\"eabu-eat-provider\" LiveProviderTableName=\"eabu-live-provider\" MoveProviderTableName=\"eabu-move-provider\" Region=\"us-east-1\""
+parameter_overrides = "AuthMode=\"enforce\" AuthUserIdClaim=\"cognito:username\" AdTableName=\"eabu-advertisement\" EatInterestedTableName=\"eabu-eat-interested\" LiveInterestedTableName=\"eabu-live-interested\" MoveInterestedTableName=\"eabu-move-interested\" MoveOfferTableName=\"eabu-move-offer\" LiveOfferTableName=\"eabu-live-offer\" EatOfferTableName=\"eabu-eat-offer\" EabuIdentityTableName=\"eabu-identity\" EatConsumerTableName=\"eabu-eat-consumer\" LiveConsumerTableName=\"eabu-live-consumer\" MoveConsumerTableName=\"eabu-move-consumer\" EatProviderTableName=\"eabu-eat-provider\" LiveProviderTableName=\"eabu-live-provider\" MoveProviderTableName=\"eabu-move-provider\" Region=\"us-east-1\""
 disable_rollback = false
 
 [default.package.parameters]

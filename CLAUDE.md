@@ -74,7 +74,6 @@ Every writable table stores a sentinel counter row at `{ID: 100, zipcode: '11111
 | `LIVE_OFFER_TABLE_NAME` | `eabu-live-offer` | Provider offers to live consumers |
 | `MOVE_OFFER_TABLE_NAME` | `eabu-move-offer` | Provider offers to move consumers |
 | `LIFESTYLE_{CONSUMER,PROVIDER,OFFER,INTERESTED,RATED}_TABLE_NAME` | `eabu-lifestyle-*` | Lifestyle requests, services, offers, interest and ratings |
-| `EABU_USER_TABLE_NAME` | `eabu-users` | User profiles |
 | `EABU_IDENTITY_TABLE_NAME` | `eabu-identity` | Identity verification records |
 | `FAVOURITES_TABLE_NAME` | `eabu-favourites` | Favourite sellers/buyers (userId + `kind#favUserId`) |
 | `EAT/LIVE/MOVE_INTERESTED_TABLE_NAME` | `eabu-*-interested` | Interest/bookmark records |
