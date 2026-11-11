@@ -103,7 +103,7 @@ Parameters:
     Description: App Store product id of the $9.99 / 3-month ad subscription.
   AppAppleId:
     Type: String
-    Default: ""
+    Default: "6833603481"
     Description: The app's numeric Apple ID (App Store Connect > App Information). Needed to verify App Store (production) purchases.
   IapAllowSandbox:
     Type: String

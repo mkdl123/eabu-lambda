@@ -107,7 +107,7 @@ Advertisers pay $9.99 for 3 months through an auto-renewing App Store subscripti
 4. Apple posts renewals, cancels, expiries and refunds to `POST /apple-iap-notifications`. This is the one route with no Cognito authorizer (`PUBLIC_ROUTES` in `scripts/create-api-routes.sh`), and each notification's signature is verified.
 5. `eabu-ad-reminder` runs daily at 14:00 UTC. It emails advertisers through SES when the renewal is 5 days away (once per period, skipped if auto-renew is off) and hides paid ads more than a day past `paidThrough`.
 
-`GET /eabu-ad/active` returns paid ads with a future `paidThrough` regardless of `?zip`, flagged `nationwide: true`. To take a paid ad down, set its `status` to `removed`; neither a purchase nor a renewal brings it back. Production purchases only verify once `AppAppleId` is set. Sandbox purchases (TestFlight, App Review) are accepted while `IapAllowSandbox` is `"true"`. The lookups scan the ad table, which is fine while it holds a few hundred rows.
+`GET /eabu-ad/active` returns paid ads with a future `paidThrough` regardless of `?zip`, flagged `nationwide: true`. To take a paid ad down, set its `status` to `removed`; neither a purchase nor a renewal brings it back. Production purchases are verified with the app's Apple ID (`AppAppleId`, 6833603481). Sandbox purchases (TestFlight, App Review) are accepted while `IapAllowSandbox` is `"true"`. The lookups scan the ad table, which is fine while it holds a few hundred rows.
 
 ### Function naming conventions
 
