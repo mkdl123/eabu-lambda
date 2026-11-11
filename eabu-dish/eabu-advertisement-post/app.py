@@ -1,5 +1,6 @@
 
 import os
+import re
 import json
 import base64
 import logging
@@ -40,6 +41,8 @@ def _clean_url(value):
     if not isinstance(value, str):
         raise ValueError("url must be a string")
     value = value.strip()
+    if value and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+        value = "https://" + value  # people type "www.shop.com" or "shop.com"
     parsed = urlparse(value)
     if parsed.scheme.lower() != "https" or not parsed.netloc or any(c.isspace() for c in value):
         raise ValueError("url must be a valid https:// link")
@@ -81,6 +84,7 @@ def lambda_handler(event, context):
             if len(str(payload.get(field) or "")) > limit:
                 raise ValueError(f"{field} is too long (max {limit} characters)")
     except ValueError as ve:
+        logger.warning("Rejected ad: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
 
     caller = helpers.get_caller_id(event)
