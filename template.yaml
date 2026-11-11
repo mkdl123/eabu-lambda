@@ -47,8 +47,6 @@ Globals:
           Ref: MoveOfferTableName
         AD_TABLE_NAME:
           Ref: AdTableName
-        AD_TABLE_REQ:
-          Ref: AdTableReqName
         AUTH_MODE:
           Ref: AuthMode
         AD_PUBLIC_STATUSES:
@@ -117,10 +115,6 @@ Parameters:
   EabuUserTableName:
     Type: String
     Default: eabu-users
-
-  AdTableReqName:
-    Type: String
-    Default: eabu-ad-req
 
   AdTableName:
     Type: String
