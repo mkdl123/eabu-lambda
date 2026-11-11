@@ -115,8 +115,6 @@ def lambda_handler(event, context):
     denied = helpers.require_authenticated(event)
     if denied:
         return denied
-    # print("Parameter id: ",id);
-    print("Parameter userId: ", pUserId);
     if not pUserId:
         return {
             "statusCode": 400,

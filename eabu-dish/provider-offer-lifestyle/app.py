@@ -65,7 +65,6 @@ def lambda_handler(event, context):
 
     partition_key = 100
     new_counter_value = helpers.increment_counter(partition_key, table)
-    print(f'New counter value: {new_counter_value}')
     item = {
         "ID": int(new_counter_value),
         "zipcode": str(payload["zip"]),

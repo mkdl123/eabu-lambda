@@ -5,12 +5,15 @@ from decimal import Decimal
 
 from my_utils import helpers
 import boto3
-from datetime import datetime
 
 from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Created once per container and reused by every request it serves.
+table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+    os.environ.get("AD_TABLE_NAME", "eabu-advertisement"))
 
 # Only these fields are public. The submitter's name, email, phone and address never are.
 PUBLIC_AD_FIELDS = ("ID", "zipcode", "status", "country", "title", "subtitle", "url", "description", "createdAt")
@@ -204,22 +207,6 @@ def decimal_serializer(obj):
 
 @helpers.cors
 def lambda_handler(event, context):
-    current_timestamp = datetime.now().isoformat()
-
-    print(current_timestamp)
-
-    table_name = os.environ.get('AD_TABLE_NAME', 'eabu-advertisement')
-    region = os.environ.get('REGION_NAME', 'us-east-1')
-
-    print(table_name)
-    print(region)
-
-    post_table = boto3.resource(
-        'dynamodb',
-        region_name=region
-    )
-
-    table = post_table.Table(table_name)
     status = event['pathParameters']['status']
 
     # Anything not explicitly published (pending, rejected, drafts...) stays private.
@@ -252,8 +239,8 @@ def lambda_handler(event, context):
                                default=decimal_serializer)
         }
 
-    except Exception as e:
-        print("There was an error: ", e)
+    except Exception:
+        logger.exception("Ad query failed")
 
         return {
             'statusCode': 500,

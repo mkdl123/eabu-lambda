@@ -78,7 +78,11 @@ Globals:
         AUTH_USER_ID_CLAIM:
           Ref: AuthUserIdClaim
     MemorySize: 256
-    Timeout: 30
+    # API Gateway gives up after 29 s anyway; a shorter limit stops a stuck function billing.
+    Timeout: 10
+    # Graviton: 20% cheaper per GB-second than x86, and builds natively on Apple-silicon Macs.
+    Architectures:
+      - arm64
 
 Parameters:
   AuthMode:
@@ -208,6 +212,8 @@ Resources:
       ContentUri: eabu-dish
       CompatibleRuntimes:
         - python3.12
+      CompatibleArchitectures:
+        - arm64
 
   EabuFeedbackSubmitFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -302,6 +308,13 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+            # A repost copies the listing's pictures onto themselves to restart their 60-day expiry.
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
 
   EabuUserZipcodeFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -821,6 +834,7 @@ Resources:
       # DELETE /profile-picture/{userId} removes it.
       CodeUri: eabu-dish/eabu-profile-picture
       Handler: app.lambda_handler
+      Timeout: 30  # resizing pictures with Pillow can take a few seconds
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -838,6 +852,7 @@ Resources:
       # a slot, DELETE /listing-picture/{category}/{zipcode}/{itemId}/{slot} removes it.
       CodeUri: eabu-dish/eabu-listing-picture
       Handler: app.lambda_handler
+      Timeout: 30  # resizing pictures with Pillow can take a few seconds
       Policies:
         - Version: '2012-10-17'
           Statement:

@@ -1,83 +1,50 @@
+"""Buyers browse sellers' household listings in a ZIP code, posted in the last 30 days."""
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+
+import boto3
+from boto3.dynamodb.conditions import Attr
 
 from my_utils import helpers
 
-import boto3
-from datetime import datetime, timedelta, timezone
-from boto3.dynamodb.conditions import Attr, Key
-
-
-
-# import requests
-
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-
-dynamodb = boto3.resource('dynamodb')
-table1 = dynamodb.Table('eabu-live') # Replace 'YourTableName'
+# Created once per container and reused by every request it serves.
+table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+    os.environ.get("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider"))
 
 
 def decimal_serializer(obj):
     if isinstance(obj, Decimal):
-        return str(obj)  # Convert Decimal to string
+        return str(obj)  # numbers go out as strings, which the app expects
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj).__name__))
 
 
 @helpers.cors
 def lambda_handler(event, context):
-    current_timestamp = datetime.now().isoformat()
-
-    print(current_timestamp)
-
-    table_name = os.environ.get('LIVE_PROVIDER_TABLE_NAME', 'eabu-live')
-    region = os.environ.get('REGION_NAME', 'us-east-1')
-
-    print(table_name)
-    print(region)
-
-    post_table = boto3.resource(
-        'dynamodb',
-        region_name=region
-    )
-
-    table = post_table.Table(table_name)
-
-    #id = event['pathParameters']['id']
     zip_code = event['pathParameters']['zip']
-    #print("Parameter id: ",id);
-    print("Parameter zip_code: ",zip_code);
-
     # last 30 days including today (UTC) -> now - 29 days
     start_created_at = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
 
     try:
-        response = table.query(
-            KeyConditionExpression =  "zipcode = :zip_code AND ID > :ID",
+        result = helpers.query_all(
+            table,
+            KeyConditionExpression="zipcode = :zip_code AND ID > :ID",
             FilterExpression=Attr("createdAt").gte(start_created_at),
-            ExpressionAttributeValues = {':zip_code': zip_code,
-                                         ":ID": 0}
+            ExpressionAttributeValues={":zip_code": zip_code, ":ID": 0},
         )
-
-        result = helpers.query_result(response)
-        helpers.attach_picture_urls(result.get("Items", []), "live")
+        helpers.attach_picture_urls(result["Items"], "live")
         return {
             'statusCode': 200,
             'body': json.dumps(result, default=decimal_serializer)
         }
-
-
-    except Exception as e:
-        print("There was an error: ", e)
-
+    except Exception:
+        logger.exception("Query failed")
         return {
             'statusCode': 500,
             'body': 'Error retrieving item'
         }
-
-
-
-
-

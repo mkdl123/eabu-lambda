@@ -85,7 +85,7 @@ def lambda_handler(event, context):
 
     # Only the owner of a listing may repost it.
     condition = "attribute_exists(ID)"
-    values = {":createdAt": created_at}
+    values = {":createdAt": created_at, ":expiresAt": helpers.post_expires_at()}
     if helpers.auth_enforced():
         condition += " AND userId = :caller"
         values[":caller"] = helpers.get_caller_id(event)
@@ -95,15 +95,16 @@ def lambda_handler(event, context):
         # Assumes index keys are: partition key = userId, sort key = itemId
 
 
-        table.update_item(
+        updated = table.update_item(
             Key={
                 "zipcode": zipcode,
                 "ID": item_id
             },
-            UpdateExpression="SET createdAt = :createdAt",
+            UpdateExpression="SET createdAt = :createdAt, expiresAt = :expiresAt",
             ConditionExpression=condition,
             ExpressionAttributeValues=values,
-        )
+            ReturnValues="ALL_NEW",
+        ).get("Attributes", {})
 
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
@@ -119,5 +120,9 @@ def lambda_handler(event, context):
             500,
             {"msg": "Failed to update item"},
         )
+
+    # The listing now lives another POST_TTL_DAYS; give its pictures the same.
+    category = {"Eat": "eat", "Live": "live", "Lifestyle": "lifestyle"}.get(payload.get("serviceCategory"), "move")
+    helpers.refresh_listing_pictures(updated, category)
 
     return helpers._response(200, {"message": "Item updated", "itemId": item_id,  "createdAt": created_at})

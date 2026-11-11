@@ -21,7 +21,6 @@ table = dynamodb.Table(table_name)
 
 def lambda_handler(event, context):
     logger.info("version=%s, top_keys=%s", event.get("version"), list(event.keys()))
-    print(f"table name: {table_name}")
 
     if event.get("httpMethod") != "POST":
         return helpers._response(400, {"msg": "Bad Request: only POST is supported"})

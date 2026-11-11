@@ -5,7 +5,6 @@ from decimal import Decimal
 
 from my_utils import helpers
 import boto3
-from datetime import datetime
 from boto3.dynamodb.conditions import Attr
 
 from boto3.dynamodb.conditions import Key
@@ -15,8 +14,9 @@ from boto3.dynamodb.conditions import Key
 logger = logging.getLogger()
 
 
-dynamodb = boto3.resource('dynamodb')
-table1 = dynamodb.Table('eabu-identity') # Replace 'YourTableName'
+# Created once per container and reused by every request it serves.
+table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+    os.environ.get("EABU_IDENTITY_TABLE_NAME", "eabu-identity"))
 
 
 def decimal_serializer(obj):
@@ -27,26 +27,7 @@ def decimal_serializer(obj):
 
 @helpers.cors
 def lambda_handler(event, context):
-    current_timestamp = datetime.now().isoformat()
-
-    print(current_timestamp)
-
-    table_name = os.environ.get('EABU_IDENTITY_TABLE_NAME', 'eabu-identity')
-    region = os.environ.get('REGION_NAME', 'us-east-1')
-
-    print(table_name)
-    print(region)
-
-    post_table = boto3.resource(
-        'dynamodb',
-        region_name=region
-    )
-
-    table = post_table.Table(table_name)
-
-    #id = event['pathParameters']['id']
     userId = event['pathParameters']['userId']
-    #print("Parameter id: ",id);
 
     denied = helpers.require_authenticated(event)
     if denied:
@@ -80,8 +61,8 @@ def lambda_handler(event, context):
         }
 
 
-    except Exception as e:
-        print("There was an error: ", e)
+    except Exception:
+        logger.exception("Identity lookup failed")
 
         return {
             'statusCode': 500,

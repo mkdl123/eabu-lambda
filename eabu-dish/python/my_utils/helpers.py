@@ -192,6 +192,39 @@ def attach_picture_urls(items, category: str):
     return items
 
 
+def refresh_listing_pictures(item, category: str):
+    """Restart the expiry clock on a listing's pictures after a repost.
+
+    The bucket deletes listings/ objects POST_TTL_DAYS after they were last written (S3
+    lifecycle), matching the listing's own expiry. Copying a picture onto itself counts as a
+    write, so a reposted listing keeps its pictures. Failures are logged, not raised: the
+    repost itself has already succeeded."""
+    global _s3_client
+    bucket = os.environ.get("IDENTITY_BUCKET_NAME", "eabu-identity-pictures")
+    for slot in PICTURE_SLOTS:
+        if not item.get(f"picture{slot}") or "ID" not in item:
+            continue
+        if _s3_client is None:
+            _s3_client = boto3.client("s3", region_name=os.environ.get("REGION_NAME", "us-east-1"))
+        key = listing_picture_key(category, item["ID"], slot)
+        try:
+            _s3_client.copy_object(Bucket=bucket, Key=key, CopySource={"Bucket": bucket, "Key": key},
+                                   MetadataDirective="REPLACE", ContentType="image/jpeg")
+        except (BotoCoreError, ClientError, TypeError, ValueError):
+            logger.exception("Could not refresh a listing picture")
+
+
+# Posts in the 8 consumer/provider tables carry expiresAt (epoch seconds); DynamoDB TTL
+# deletes them that long after they were created or last reposted, and the picture bucket's
+# lifecycle rule deletes listings/ pictures on the same schedule.
+POST_TTL_DAYS = 60
+
+
+def post_expires_at(now=None) -> int:
+    now = now or datetime.now(timezone.utc)
+    return int(now.timestamp()) + POST_TTL_DAYS * 86400
+
+
 # A seller may post at most this many services per category in any 30 days
 # (the app checks first; this is the server-side guard).
 MONTHLY_POST_LIMIT = 10
@@ -254,6 +287,21 @@ def public_listings(items):
 def query_result(response: dict) -> dict:
     """A DynamoDB query response without the AWS metadata, safe to return to clients."""
     return {k: v for k, v in response.items() if k != "ResponseMetadata"}
+
+
+def query_all(table, **kwargs) -> dict:
+    """Run a DynamoDB query and follow LastEvaluatedKey until every page is read.
+
+    A single query call stops at 1 MB, so without this a busy ZIP or user would silently lose
+    results. Returns {"Items", "Count", "ScannedCount"} like query_result, for all pages."""
+    items, scanned = [], 0
+    while True:
+        page = table.query(**kwargs)
+        items += page.get("Items", [])
+        scanned += page.get("ScannedCount", 0)
+        if "LastEvaluatedKey" not in page:
+            return {"Items": items, "Count": len(items), "ScannedCount": scanned}
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
 def coarsen_location(items, places=2):

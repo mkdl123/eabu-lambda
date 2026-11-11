@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -49,6 +50,11 @@ CATEGORIES = ("eat", "live", "move", "lifestyle")
 ROLE_TABLE = {"seller": "PROVIDER", "buyer": "CONSUMER"}
 NEARBY_MAX_POSTS = 200  # only when not paging
 MAX_PAGE_SIZE = 50
+# The nearby feed scans whole post tables. A warm container keeps each scan this long, so
+# scrolling through pages (and other users nearby) don't repeat it. A new post can take this
+# long to appear in other people's feeds.
+SCAN_CACHE_SECONDS = 60
+_scan_cache = {}  # table name -> (time scanned, cutoff used, items)
 FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "phone",
                "totalstars", "ratingscount", "createdAt", "picture1", "picture2")
 
@@ -213,10 +219,22 @@ def feed(event, user_id, kind):
 
 
 def _recent_posts(table, cutoff):
-    """Every post in the table created since cutoff.
-    A scan is fine while the post tables are small. If they grow large, add a geohash GSI
-    and query the cells around the user instead (a 50-mile radius covers up to ~900 ZIPs,
-    so querying ZIP by ZIP isn't practical)."""
+    """Every post in the table created since cutoff, reusing a scan made in the last
+    SCAN_CACHE_SECONDS (its cutoff is at most that much older, so it is filtered again)."""
+    cached = _scan_cache.get(table.name)
+    if cached and time.time() - cached[0] < SCAN_CACHE_SECONDS:
+        return [i for i in cached[2] if str(i.get("createdAt", "")) >= cutoff]
+    items = _recent_posts_uncached(table, cutoff)
+    _scan_cache[table.name] = (time.time(), cutoff, items)
+    return items
+
+
+def _recent_posts_uncached(table, cutoff):
+    """Scan the table for posts created since cutoff.
+    A scan is fine while the post tables are small (DynamoDB TTL now deletes posts after
+    60 days, which bounds them). If they grow large, add a geohash GSI and query the cells
+    around the user instead (a 50-mile radius covers up to ~900 ZIPs, so querying ZIP by
+    ZIP isn't practical)."""
     items, kwargs = [], {"FilterExpression": Attr("createdAt").gte(cutoff)}  # skips the counter row too
     while True:
         page = table.scan(**kwargs)

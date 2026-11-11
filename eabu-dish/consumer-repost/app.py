@@ -70,7 +70,7 @@ def lambda_handler(event, context):
 
     # Only the owner of a listing may repost it.
     condition = "attribute_exists(ID)"
-    values = {":createdAt": created_at}
+    values = {":createdAt": created_at, ":expiresAt": helpers.post_expires_at()}
     if helpers.auth_enforced():
         condition += " AND userId = :caller"
         values[":caller"] = helpers.get_caller_id(event)
@@ -85,7 +85,7 @@ def lambda_handler(event, context):
                 "zipcode": zipcode,
                 "ID": item_id
             },
-            UpdateExpression="SET createdAt = :createdAt",
+            UpdateExpression="SET createdAt = :createdAt, expiresAt = :expiresAt",
             ConditionExpression=condition,
             ExpressionAttributeValues=values,
         )

@@ -1,50 +1,31 @@
+"""A seller's food listings from the last 30 days: full for the owner, public fields for others."""
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from my_utils import helpers
 import boto3
-from datetime import datetime, timedelta, timezone
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
-from boto3.dynamodb.conditions import Key
-
-# import requests
+from my_utils import helpers
 
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-
-dynamodb = boto3.resource('dynamodb')
-table1 = dynamodb.Table('eabu-eat-provider') # Replace 'YourTableName'
+# Created once per container and reused by every request it serves.
+table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+    os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider"))
 
 
 def decimal_serializer(obj):
     if isinstance(obj, Decimal):
-        return str(obj)  # Convert Decimal to string
+        return str(obj)  # numbers go out as strings, which the app expects
     raise TypeError("Object of type {} is not JSON serializable".format(type(obj).__name__))
 
 
 @helpers.cors
 def lambda_handler(event, context):
-    current_timestamp = datetime.now().isoformat()
-
-    print(current_timestamp)
-
-    table_name = os.environ.get("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider")
-    region = os.environ.get('REGION_NAME', 'us-east-1')
-
-    print(table_name)
-    print(region)
-
-    post_table = boto3.resource(
-        'dynamodb',
-        region_name=region
-    )
-
-    table = post_table.Table(table_name)
-
-    #id = event['pathParameters']['id']
     userId = event['pathParameters']['userId']
 
     # The owner gets their full listings; anyone else signed in (e.g. a buyer
@@ -53,35 +34,27 @@ def lambda_handler(event, context):
     if denied:
         return denied
     is_owner = helpers.get_caller_id(event) == str(userId)
-    print("Parameter userId: ",userId);
 
-    # last 30 days cutoff (epoch seconds, UTC)
+    # last 30 days cutoff (UTC, whole seconds), e.g. "2026-02-15T00:01:12+00:00"
     cutoff_epoch = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
     cutoff_iso = datetime.fromtimestamp(cutoff_epoch, tz=timezone.utc).isoformat()
-    # e.g. "2026-02-15T00:01:12+00:00"
 
     try:
-
-        response = table.query(
+        result = helpers.query_all(
+            table,
             IndexName="userId-index",
             KeyConditionExpression=Key("userId").eq(userId),
             FilterExpression=Attr("createdAt").gte(cutoff_iso),
         )
-
-        result = helpers.query_result(response)
-        helpers.attach_picture_urls(result.get("Items", []), "eat")
+        helpers.attach_picture_urls(result["Items"], "eat")
         if not is_owner:
-            result["Items"] = helpers.public_listings(result.get("Items", []))
-
+            result["Items"] = helpers.public_listings(result["Items"])
         return {
             'statusCode': 200,
             'body': json.dumps(result, default=decimal_serializer)
         }
-
-
-    except Exception as e:
-        print("There was an error: ", e)
-
+    except Exception:
+        logger.exception("Query failed")
         return {
             'statusCode': 500,
             'body': 'Error retrieving item'

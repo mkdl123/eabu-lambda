@@ -49,7 +49,6 @@ def lambda_handler(event, context):
     logger.info("userId=%s", payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"]));
     partition_key = 100  # Replace 'your_partition_key'
     new_counter_value = helpers.increment_counter(partition_key, table)
-    print(f'New counter value: {new_counter_value}')
     item = {
         "ID": int(new_counter_value),
         "zipcode": str(payload["zipcode"]),
@@ -60,7 +59,8 @@ def lambda_handler(event, context):
         "phone": payload["phone"],
         "latitude": str(payload["latitude"]),
         "longitude": str(payload["longitude"]),
-        "createdAt": str(datetime.now().isoformat())
+        "createdAt": str(datetime.now().isoformat()),
+        "expiresAt": helpers.post_expires_at(),  # DynamoDB TTL deletes the post then
     }
     # Optional street address so buyers/sellers can find the place on a map.
     address = helpers.optional_address(payload)
