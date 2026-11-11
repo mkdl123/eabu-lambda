@@ -86,6 +86,10 @@ Tables are created outside the SAM stack (for Lifestyle: `scripts/create-lifesty
 
 The REST API behind `api.eabu.net` is managed outside `template.yaml`, so a new route needs setting up there as well as its function (`scripts/create-api-routes.sh` adds them).
 
+### Logs and cleanup
+
+Lambda log groups keep 30 days. A new function's log group starts with no expiry, so run `scripts/set-log-retention.sh` after deploying one. The SAM deploy bucket deletes files after 90 days (a lifecycle rule; 90 rather than 30 so a CloudFormation rollback can still find the previous deploy's code). On 2026-11-10 the cost/cleanup pass deleted the WAF and both CloudFront distributions, the old Amplify environments `d87d3`/`cf209` (the app uses Amplify app `d25vnfgn4l0ej3`, env `c88ad`), the `helloworld` Lambda and the empty `eabu-http` HTTP API.
+
 ### S3
 
 - `eabu-identity-pictures` — despite the name, now stores only each user's optional profile picture at `{userId}/profile.jpg` (one per user; the bucket is unversioned, so a new upload replaces the old one). `eabu-profile-picture` handles `POST /profile-picture` (upload/replace) and `DELETE /profile-picture/{userId}`; no identity images (selfies, licences) are collected. The `eabu-user` function generates presigned GET URLs from this bucket.
