@@ -97,6 +97,19 @@ Parameters:
     Type: String
     Default: "cognito:username"
     Description: Cognito claim that holds the app's userId (usually "sub" or "cognito:username").
+  AdProductId:
+    Type: String
+    Default: net.eabu.app.ad.quarterly
+    Description: App Store product id of the $9.99 / 3-month ad subscription.
+  AppAppleId:
+    Type: String
+    Default: ""
+    Description: The app's numeric Apple ID (App Store Connect > App Information). Needed to verify App Store (production) purchases.
+  IapAllowSandbox:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Accept sandbox purchases too. Keep "true", since TestFlight and App Review buy in the sandbox.
 
   EabuFeedbackTableName:
     Type: String
@@ -901,6 +914,7 @@ Resources:
       Environment:
         Variables:
           AD_REQUEST_TABLE: !Ref AdTableName
+          AD_PRODUCT_ID: !Ref AdProductId
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -908,8 +922,81 @@ Resources:
               Action:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
+                - dynamodb:Scan          # the owner's paid ads (one paid ad per owner)
+                - dynamodb:DeleteItem    # their unpaid drafts
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+
+  # Paid ads (Apple in-app subscription, $9.99 / 3 months, shown nationwide).
+  EabuAdPurchaseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-ad-purchase
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          AD_PRODUCT_ID: !Ref AdProductId
+          APP_APPLE_ID: !Ref AppAppleId
+          IAP_ALLOW_SANDBOX: !Ref IapAllowSandbox
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+
+  # Called by Apple (App Store Server Notifications V2), so its route has no Cognito authorizer.
+  EabuAppleNotificationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-apple-notifications
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          AD_PRODUCT_ID: !Ref AdProductId
+          APP_APPLE_ID: !Ref AppAppleId
+          IAP_ALLOW_SANDBOX: !Ref IapAllowSandbox
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+
+  # Daily: emails advertisers 5 days before their ad renews, hides lapsed paid ads.
+  EabuAdReminderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-ad-reminder
+      Handler: app.lambda_handler
+      Timeout: 60
+      Events:
+        Daily:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 14 * * ? *)   # 14:00 UTC = 9 or 10 am US Eastern
+            Description: Paid ad renewal reminders
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/eabu.net'
+                - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/*@*'
 
 
 

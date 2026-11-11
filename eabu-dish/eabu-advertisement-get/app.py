@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from my_utils import helpers
@@ -229,9 +230,17 @@ def lambda_handler(event, context):
                 break
             kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
 
-        items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in found]
+        # Paid ads show to everyone, whatever the ZIP, while their paid period lasts.
+        # Free ads only show within NEARBY_MILES of the ZIP, as before.
+        now = int(datetime.now(timezone.utc).timestamp())
+        paid = [i for i in found if i.get('paid') is True]
+        free = [i for i in found if i.get('paid') is not True]
+        national = [{**{k: i[k] for k in PUBLIC_AD_FIELDS if k in i}, 'nationwide': True}
+                    for i in paid if int(i.get('paidThrough') or 0) > now]
+        items = [{k: i[k] for k in PUBLIC_AD_FIELDS if k in i} for i in free]
         if zip_code:
             items = helpers.within_miles(zip_code, items, helpers.NEARBY_MILES)
+        items = national + items
         return {
             'statusCode': 200,
             'body': json.dumps({'Items': items, 'Count': len(items),

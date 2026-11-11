@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle, profile
-# picture, listing picture and favourites routes). Each route gets the Cognito authorizer, a Lambda proxy integration and
+# picture, listing picture, favourites and paid-ad routes). Each route gets the Cognito authorizer
+# (except PUBLIC_ROUTES), a Lambda proxy integration and
 # a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
 # RETIRED_ROUTES (the old identity/selfie upload, the
 # old follow feature, replaced by favourites, and two lookups no app version called).
@@ -51,7 +52,22 @@ ROUTES=(
   "POST /favourites EabuFavouritesFunction"
   "DELETE /favourites/{userId}/{kind}/{favUserId} EabuFavouritesFunction"
   "GET /favourites-feed/{userId}/{kind} EabuFavouritesFunction"
+  "POST /eabu-ad-purchase EabuAdPurchaseFunction"
+  "GET /eabu-ad-purchase/{userId} EabuAdPurchaseFunction"
+  "POST /apple-iap-notifications EabuAppleNotificationsFunction"
 )
+
+# Routes called by outside services rather than the app: no Cognito authorizer.
+# The function itself verifies every request (Apple's signature on each notification).
+PUBLIC_ROUTES=(
+  "POST /apple-iap-notifications"
+)
+
+is_public() { # method path -> success when the route takes no Cognito sign-in
+  local r
+  for r in "${PUBLIC_ROUTES[@]}"; do [[ "$r" == "$1 $2" ]] && return 0; done
+  return 1
+}
 
 # method  path  - methods to remove (their function no longer exists)
 RETIRED_ROUTES=(
@@ -161,9 +177,13 @@ for route in "${ROUTES[@]}"; do
   clear_unfinished "$id" "$method"
 
   params=$(path_params "$path")
+  if is_public "$method" "$path"; then
+    auth=(--authorization-type NONE)
+  else
+    auth=(--authorization-type COGNITO_USER_POOLS --authorizer-id "$AUTHORIZER_ID")
+  fi
   api put-method --rest-api-id "$API_ID" --resource-id "$id" --http-method "$method" \
-    --authorization-type COGNITO_USER_POOLS --authorizer-id "$AUTHORIZER_ID" \
-    ${params:+--request-parameters "$params"} >/dev/null
+    "${auth[@]}" ${params:+--request-parameters "$params"} >/dev/null
   arn="arn:aws:lambda:$REGION:$ACCOUNT:function:$name"
   api put-integration --rest-api-id "$API_ID" --resource-id "$id" --http-method "$method" \
     --type AWS_PROXY --integration-http-method POST --content-handling CONVERT_TO_TEXT \
