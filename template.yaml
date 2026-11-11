@@ -310,34 +310,6 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
 
-  EabuUserZipcodeFunctionName:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-    Properties:
-      CodeUri: eabu-dish/eabu-user-zip
-      Handler: app.lambda_handler
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:UpdateItem
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuUserTableName}'
-
-  EabuGetUserFunctionName:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-    Properties:
-      CodeUri: eabu-dish/eabu-get-user
-      Handler: app.lambda_handler
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuIdentityTableName}/index/*'
-
   EabuCheckUserInterestedFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:

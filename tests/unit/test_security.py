@@ -268,38 +268,6 @@ def test_ads_require_review():
     del os.environ["AD_PUBLIC_STATUSES"]
 
 
-@mock_aws
-def test_get_user_only_finds_own_record():
-    boto3.client("dynamodb", region_name="us-east-1").create_table(
-        TableName="eabu-identity", BillingMode="PAY_PER_REQUEST",
-        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("userId", "phone", "email")],
-        GlobalSecondaryIndexes=[{"IndexName": f"{a}-index", "KeySchema": [{"AttributeName": a, "KeyType": "HASH"}],
-                                 "Projection": {"ProjectionType": "ALL"}} for a in ("phone", "email")])
-    ident = boto3.resource("dynamodb", region_name="us-east-1").Table("eabu-identity")
-    ident.put_item(Item={"userId": "alice", "phone": "555", "email": "a@x.com"})
-    ident.put_item(Item={"userId": "bob", "phone": "555", "email": "b@x.com"})
-    gu = load("eabu-get-user")
-
-    def lookup(param, uid=None):
-        ev = {"pathParameters": {"param": param}}
-        return gu.lambda_handler(as_user(ev, uid) if uid else ev, None)
-
-    os.environ["AUTH_MODE"] = "enforce"
-    try:
-        check("[enforce] lookup needs sign-in", lookup("a@x.com")["statusCode"] == 401)
-        check("[enforce] own email found", json.loads(lookup("a@x.com", "alice")["body"])["userId"] == "alice")
-        check("[enforce] own phone found", json.loads(lookup("555", "alice")["body"])["userId"] == "alice")
-        check("[enforce] shared phone returns the caller, not the first match",
-              json.loads(lookup("555", "bob")["body"])["userId"] == "bob")
-        other, missing = lookup("a@x.com", "mallory"), lookup("nobody@x.com", "mallory")
-        check("[enforce] someone else's email looks the same as an unknown one",
-              (other["statusCode"], other["body"]) == (missing["statusCode"], missing["body"]))
-        check("[enforce] no userId revealed", "alice" not in other["body"])
-    finally:
-        os.environ["AUTH_MODE"] = "off"
-
-
 def mk_with_user_index(name):
     boto3.client("dynamodb", region_name="us-east-1").create_table(
         TableName=name, BillingMode="PAY_PER_REQUEST",
@@ -443,7 +411,7 @@ def test_auth_fails_closed_when_mode_is_missing():
         os.environ["AUTH_MODE"] = "off"
 
 
-CORS_FUNCTIONS = ["eabu-get-user", "eabu-user", "eabu-profile-picture", "eabu-listing-picture", "eabu-favourites", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
+CORS_FUNCTIONS = ["eabu-user", "eabu-profile-picture", "eabu-listing-picture", "eabu-favourites", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
     name.format(c) for c in ("eat", "live", "move")
     for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")] + [
     "provider-my-lifestyle-services"]
