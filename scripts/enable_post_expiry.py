@@ -21,6 +21,7 @@ import time
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 REGION = "us-east-1"
@@ -56,7 +57,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     dry = ap.parse_args().dry_run
     ddb = boto3.resource("dynamodb", region_name=REGION)
-    ddb_client = boto3.client("dynamodb", region_name=REGION)
+    # DescribeTimeToLive has a low rate limit; retry with backoff instead of failing.
+    ddb_client = boto3.client("dynamodb", region_name=REGION,
+                              config=Config(retries={"max_attempts": 10, "mode": "adaptive"}))
     s3 = boto3.client("s3", region_name=REGION)
     now = int(time.time())
     totals = {"posts": 0, "set": 0, "already": 0, "expired": 0, "pictures": 0}
