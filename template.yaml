@@ -221,6 +221,11 @@ Parameters:
     Default: eabu-blocked-emails
     Description: Hashed emails of recently deleted accounts (scripts/create-blocked-emails-table.sh).
 
+  IdentityPoolId:
+    Type: String
+    Default: us-east-1:53cd420f-6f1e-409a-80fe-f65b803e9fd7
+    Description: Cognito identity pool the app uses (account deletion removes the user's identity).
+
   UserPoolId:
     Type: String
     Default: us-east-1_G0VobzUMd
@@ -276,6 +281,7 @@ Resources:
       Environment:
         Variables:
           USER_POOL_ID: !Ref UserPoolId
+          IDENTITY_POOL_ID: !Ref IdentityPoolId
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -349,6 +355,11 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
+            - Effect: Allow
+              Action:
+                - cognito-identity:DeleteIdentities
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cognito-identity:${Region}:${AWS::AccountId}:identitypool/${IdentityPoolId}'
             - Effect: Allow
               Action:
                 - cognito-idp:AdminGetUser

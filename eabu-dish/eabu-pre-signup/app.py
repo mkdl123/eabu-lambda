@@ -49,6 +49,6 @@ def lambda_handler(event, context):
     if until > time.time():
         day = datetime.fromtimestamp(until, timezone.utc).strftime("%B %-d, %Y")
         logger.info("Sign-up refused: email belongs to a recently deleted account")
-        raise EmailBlocked(f"This email was used by an account that was deleted recently. "
-                           f"You can sign up with it again from {day}.")
+        raise EmailBlocked(f"You can't create an account with this email for 30 days after its "
+                           f"account was deleted. You can use it again from {day}.")
     return event

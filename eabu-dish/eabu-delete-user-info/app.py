@@ -7,6 +7,7 @@ The signed-in user can delete only themselves. In one go this removes:
   - their favourites, and other people's favourites of them;
   - their ads, post-credit balance, legacy identity record, service requests and feedback;
   - their profile picture;
+  - their Cognito identity-pool identity (found with the caller's own sign-in token);
   - their Cognito sign-in account (last, so a failure part-way can be retried by tapping again).
 
 Their email is then blocked from signing up again for helpers.EMAIL_BLOCK_DAYS (the
@@ -36,12 +37,14 @@ logger.setLevel(logging.INFO)
 
 REGION = os.environ.get("REGION_NAME", "us-east-1")
 USER_POOL_ID = os.environ.get("USER_POOL_ID", "us-east-1_G0VobzUMd")
+IDENTITY_POOL_ID = os.environ.get("IDENTITY_POOL_ID", "")
 BUCKET = os.environ.get("IDENTITY_BUCKET_NAME", "eabu-identity-pictures")
 CATEGORIES = ("eat", "live", "move", "lifestyle")
 
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 cognito = boto3.client("cognito-idp", region_name=REGION)
+cognito_identity = boto3.client("cognito-identity", region_name=REGION)
 
 
 def _table(env, default):
@@ -102,6 +105,25 @@ def _account_email(user_id):
         return None
     attrs = {a["Name"]: a["Value"] for a in user.get("UserAttributes", [])}
     return attrs.get("email")
+
+
+def _delete_identity(event):
+    """Delete the caller's identity-pool identity, using the ID token they called us with.
+
+    The identity is only a random ID linked to their sign-in, so a failure here is logged and
+    doesn't stop the account deletion."""
+    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    token = str(headers.get("authorization") or "")
+    token = token[7:] if token.lower().startswith("bearer ") else token
+    if not (IDENTITY_POOL_ID and token):
+        return
+    provider = f"cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}"
+    try:
+        identity_id = cognito_identity.get_id(IdentityPoolId=IDENTITY_POOL_ID,
+                                              Logins={provider: token})["IdentityId"]
+        cognito_identity.delete_identities(IdentityIdsToDelete=[identity_id])
+    except Exception:  # best effort: never let this stop the account deletion
+        logger.exception("Could not delete the identity-pool identity")
 
 
 def delete_user(user_id: str) -> dict:
@@ -192,6 +214,7 @@ def lambda_handler(event, context):
     try:
         # Record the request first, so a failure part-way leaves it visible.
         delete_requests.put_item(Item={"userId": user_id})
+        _delete_identity(event)  # while the sign-in token is still valid
         counts = delete_user(user_id)
     except (BotoCoreError, ClientError):
         logger.exception("Account deletion failed")

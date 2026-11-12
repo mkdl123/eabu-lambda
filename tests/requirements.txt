@@ -1,4 +1,4 @@
 pytest
 boto3
-moto[dynamodb,s3,cognitoidp]>=5
+moto[dynamodb,s3,cognitoidp,cognitoidentity]>=5
 Pillow==13.0.0

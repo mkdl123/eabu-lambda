@@ -155,7 +155,8 @@ def test_deleted_email_cannot_sign_up_for_30_days(monkeypatch):
 
     with pytest.raises(trigger.EmailBlocked) as refused:
         trigger.lambda_handler(signup_event(" ALICE@example.com"), None)
-    assert "sign up with it again from" in str(refused.value)
+    assert "can't create an account with this email for 30 days" in str(refused.value)
+    assert "You can use it again from" in str(refused.value)
     assert trigger.lambda_handler(signup_event("bob2@example.com"), None)["triggerSource"] == "PreSignUp_SignUp"
     assert trigger.lambda_handler(signup_event("alice@example.com", "PreSignUp_AdminCreateUser"), None), \
         "support can still create the account"
@@ -174,3 +175,30 @@ def test_signup_allowed_if_the_check_breaks(monkeypatch):
         raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "x"}}, "GetItem")
     monkeypatch.setattr(trigger.blocked_emails, "get_item", broken)
     assert trigger.lambda_handler(signup_event("anyone@example.com"), None)
+
+
+@mock_aws
+def test_identity_pool_identity_is_deleted(monkeypatch):
+    setup(monkeypatch)
+    ci = boto3.client("cognito-identity", region_name=REGION)
+    pool_id = ci.create_identity_pool(IdentityPoolName="eabu", AllowUnauthenticatedIdentities=False)["IdentityPoolId"]
+    monkeypatch.setenv("IDENTITY_POOL_ID", pool_id)
+    fn = load("eabu-delete-user-info")
+    deleted = []
+    monkeypatch.setattr(fn.cognito_identity, "delete_identities",
+                        lambda IdentityIdsToDelete: deleted.extend(IdentityIdsToDelete))
+    event = as_user(post({"userId": "alice"}), "alice")
+    event["headers"] = {"Authorization": "Bearer alice-id-token"}
+    assert fn.lambda_handler(event, None)["statusCode"] == 200
+    assert len(deleted) == 1, "the caller's identity is looked up with their token and deleted"
+
+
+@mock_aws
+def test_identity_failure_does_not_stop_deletion(monkeypatch):
+    t, s3, cognito, pool = setup(monkeypatch)
+    monkeypatch.setenv("IDENTITY_POOL_ID", "us-east-1:missing")
+    fn = load("eabu-delete-user-info")
+    event = as_user(post({"userId": "alice"}), "alice")
+    event["headers"] = {"authorization": "Bearer x"}
+    assert fn.lambda_handler(event, None)["statusCode"] == 200
+    assert users_in(cognito, pool) == ["bob"]
