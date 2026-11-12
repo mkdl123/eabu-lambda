@@ -94,6 +94,18 @@ def test_buyer_request_receives_seller_offer():
 
 
 @mock_aws
+def test_offer_keeps_what_one_unit_is():
+    make_tables()
+    item_id = post_request()
+    offer = load("provider-offer-lifestyle")
+    assert offer.lambda_handler(post({**offer_payload(item_id), "unit": " 1 hr "}), None)["statusCode"] == 200
+    items = body(load("consumer-lifestyle-offers").lambda_handler(get(userId="buyer", itemId=str(item_id)), None))["Items"]
+    assert (items[0]["price"], items[0]["unit"]) == ("20", "1 hr")
+    too_long = {**offer_payload(item_id), "unit": "x" * 41}
+    assert offer.lambda_handler(post(too_long), None)["statusCode"] == 400
+
+
+@mock_aws
 def test_seller_listing_is_browsable():
     make_tables()
     item_id = post_service()

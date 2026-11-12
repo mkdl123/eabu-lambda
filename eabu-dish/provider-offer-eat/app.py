@@ -85,6 +85,10 @@ def lambda_handler(event, context):
         "longitude": str(payload["longitude"]),
         "createdAt": str(datetime.now().isoformat())
     }
+    # What one unit of the price covers ("1 hr", "Everything"...). Older app builds don't send it.
+    unit = str(payload.get("unit") or "").strip()
+    if unit:
+        item["unit"] = unit
 
 
     try:

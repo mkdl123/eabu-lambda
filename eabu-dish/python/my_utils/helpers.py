@@ -17,7 +17,7 @@ logger.setLevel(logging.INFO)
 FIELD_LIMITS = {
     "zipcode": 10, "zip": 10, "userId": 128, "pUserId": 128, "cUserId": 128,
     "title": 200, "description": 5000, "offerDescription": 5000, "message": 5000,
-    "phone": 32, "phoneNumber": 32, "email": 254, "price": 32, "serviceType": 100,
+    "phone": 32, "phoneNumber": 32, "email": 254, "price": 32, "unit": 40, "serviceType": 100,
     "latitude": 32, "longitude": 32, "address": 200,
 }
 COORDINATE_FIELDS = ("latitude", "longitude")
