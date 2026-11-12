@@ -24,7 +24,15 @@ def mk(ddb, name, hk, hkt, rk=None, rkt=None):
         ad.append({"AttributeName": "userId", "AttributeType": "S"})
         extra["GlobalSecondaryIndexes"] = [{"IndexName": "userId-index", "Projection": {"ProjectionType": "ALL"},
                                             "KeySchema": [{"AttributeName": "userId", "KeyType": "HASH"}]}]
-    return ddb.create_table(TableName=name, KeySchema=ks, AttributeDefinitions=ad, BillingMode="PAY_PER_REQUEST", **extra)
+    table = ddb.create_table(TableName=name, KeySchema=ks, AttributeDefinitions=ad, BillingMode="PAY_PER_REQUEST", **extra)
+    if name == "eabu-eat-provider":
+        # Seller posts count this month's free posts across all four seller tables, so
+        # (as in production) the others exist too.
+        existing = ddb.meta.client.list_tables()["TableNames"]
+        for other in ("eabu-live-provider", "eabu-move-provider", "eabu-lifestyle-provider"):
+            if other not in existing:
+                mk(ddb, other, "zipcode", "S", "ID", "N")
+    return table
 
 
 def post(body):

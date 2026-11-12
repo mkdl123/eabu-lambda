@@ -1,4 +1,4 @@
-"""App Store Server Notifications V2 for paid ads: POST /apple-iap-notifications.
+"""App Store Server Notifications V2 for paid ads and extra posts: POST /apple-iap-notifications.
 
 Apple calls this (no Cognito sign-in) whenever an ad subscription renews, fails to
 renew, is cancelled, expires or is refunded. The body's signedPayload is verified
@@ -19,6 +19,7 @@ from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import BotoCoreError, ClientError
 
 from my_utils import apple_iap
+from my_utils import helpers
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,6 +30,8 @@ table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us
 # Notification types that end the ad now, and those that extend or keep it.
 ENDS_AD = {"EXPIRED", "GRACE_PERIOD_EXPIRED", "REFUND", "REVOKE"}
 EXTENDS_AD = {"SUBSCRIBED", "DID_RENEW", "OFFER_REDEEMED"}
+# Notification types that undo an extra-posts pack (a consumable).
+TAKES_POSTS_BACK = {"REFUND", "REVOKE"}
 MAX_BODY = 100_000
 
 
@@ -56,6 +59,8 @@ def apply_notification(note):
     original_id = (tx or {}).get("originalTransactionId") or (renewal or {}).get("originalTransactionId")
     if not original_id:
         return "ignored"
+    if tx and tx["productId"] == apple_iap.posts_product_id():
+        return _posts_notification(note)
     if tx and tx["productId"] != apple_iap.product_id():
         return "ignored"
     ad = _ad_for(original_id)
@@ -86,6 +91,31 @@ def apply_notification(note):
     table.update_item(**kwargs)
     logger.info("Ad %s: %s", ad["ID"], values[":n"])
     return "updated"
+
+
+def _posts_notification(note):
+    """A refunded extra-posts pack takes its posts back (never below zero)."""
+    if note["type"] not in TAKES_POSTS_BACK:
+        return "ignored"
+    credits = helpers.post_credits_table()
+    key = {"userId": f"tx#{note['transaction']['transactionId']}"}
+    record = credits.get_item(Key=key).get("Item")
+    if not record:
+        return "unknown"
+    try:
+        credits.update_item(Key=key, UpdateExpression="SET refundedAt = :at",
+                            ConditionExpression="attribute_not_exists(refundedAt)",
+                            ExpressionAttributeValues={":at": datetime.now(timezone.utc).isoformat()})
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return "already refunded"
+        raise
+    owner, posts = record["ownerUserId"], int(record.get("posts") or helpers.POSTS_PER_PACK)
+    balance = helpers.post_credit_balance(owner)
+    credits.update_item(Key={"userId": owner}, UpdateExpression="SET balance = :b",
+                        ExpressionAttributeValues={":b": max(0, balance - posts)})
+    logger.info("Posts pack refunded: balance %s -> %s", balance, max(0, balance - posts))
+    return "posts taken back"
 
 
 def lambda_handler(event, context):

@@ -68,8 +68,8 @@ def lambda_handler(event, context):
     if denied:
         return denied
 
-    # Reviving an expired listing counts as a new post toward the monthly limit; reposting
-    # one that is still live doesn't (it is already counted).
+    # Reposting a listing from before this month counts as a new post toward this month's
+    # free posts; reposting one from this month doesn't (it is already counted).
     try:
         current = table.get_item(Key={"zipcode": zipcode, "ID": item_id},
                                  ProjectionExpression="userId, createdAt").get("Item")
@@ -78,8 +78,9 @@ def lambda_handler(event, context):
         return helpers._response(500, {"msg": "Failed to update item"})
     if not current or (helpers.auth_enforced() and current.get("userId") != helpers.get_caller_id(event)):
         return helpers._response(404, {"msg": f"No item found for itemId={item_id}"})
+    spent_credit = False
     if str(current.get("createdAt", "")) < helpers.post_limit_cutoff():
-        limited = helpers.post_limit_reached(table, current.get("userId"))
+        limited, spent_credit = helpers.post_allowance(table, current.get("userId"))
         if limited:
             return limited
 
@@ -106,15 +107,11 @@ def lambda_handler(event, context):
             ReturnValues="ALL_NEW",
         ).get("Attributes", {})
 
-    except ClientError as e:
-        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+    except (ClientError, BotoCoreError, ValueError) as e:
+        if spent_credit:
+            helpers.refund_post_credit(current.get("userId"))
+        if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
             return helpers._response(404, {"msg": f"No item found for itemId={item_id}"})
-        logger.exception("Failed to update item in DynamoDB")
-        return helpers._response(
-            500,
-            {"msg": "Failed to update item"},
-        )
-    except (BotoCoreError, ValueError):
         logger.exception("Failed to update item in DynamoDB")
         return helpers._response(
             500,

@@ -11,6 +11,8 @@ Globals:
       Variables:
         REGION_NAME:
           Ref: Region
+        POST_CREDITS_TABLE_NAME:
+          Ref: PostCreditsTableName
         EABU_FEEDBACK_TABLE_NAME:
           Ref: EabuFeedbackTableName
         EABU_DELETE_TABLE:
@@ -101,6 +103,14 @@ Parameters:
     Type: String
     Default: net.eabu.app.ad.quarterly
     Description: App Store product id of the $9.99 / 3-month ad subscription.
+  PostsProductId:
+    Type: String
+    Default: net.eabu.app.posts15
+    Description: App Store product id of the $0.99 consumable that adds 15 extra posts.
+  PostCreditsTableName:
+    Type: String
+    Default: eabu-post-credits
+    Description: Each seller's extra-post balance and the Apple transactions already credited (created by scripts/create-post-credits-table.sh).
   AppAppleId:
     Type: String
     Default: "6833603481"
@@ -316,6 +326,22 @@ Resources:
                 - s3:PutObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
+            # Past the free monthly limit a post spends an extra post (helpers.post_allowance).
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # The free posts are counted across all four seller tables.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
 
   EabuCheckUserInterestedFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -495,6 +521,22 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+            # Past the free monthly limit a post spends an extra post (helpers.post_allowance).
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # The free posts are counted across all four seller tables.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
 
   ProviderPostLiveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -512,6 +554,22 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+            # Past the free monthly limit a post spends an extra post (helpers.post_allowance).
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # The free posts are counted across all four seller tables.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
 
   ProviderPostEatFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -529,6 +587,22 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+            # Past the free monthly limit a post spends an extra post (helpers.post_allowance).
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # The free posts are counted across all four seller tables.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
 
   ConsumerPostMoveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -948,6 +1022,37 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
 
+  # Extra posts: verifies an Apple purchase of the $0.99 pack and adds 15 posts.
+  EabuPostCreditsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-post-credits
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          POSTS_PRODUCT_ID: !Ref PostsProductId
+          APP_APPLE_ID: !Ref AppAppleId
+          IAP_ALLOW_SANDBOX: !Ref IapAllowSandbox
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # Counts this month's free posts per category for the app.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
+
   # Called by Apple (App Store Server Notifications V2), so its route has no Cognito authorizer.
   EabuAppleNotificationsFunction:
     Type: AWS::Serverless::Function
@@ -957,6 +1062,7 @@ Resources:
       Environment:
         Variables:
           AD_PRODUCT_ID: !Ref AdProductId
+          POSTS_PRODUCT_ID: !Ref PostsProductId
           APP_APPLE_ID: !Ref AppAppleId
           IAP_ALLOW_SANDBOX: !Ref IapAllowSandbox
       Policies:
@@ -968,6 +1074,13 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+            # A refunded extra-posts pack takes its posts back.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   # Daily: emails advertisers 5 days before their ad renews, hides lapsed paid ads.
   EabuAdReminderFunction:
@@ -997,7 +1110,6 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/eabu.net'
                 - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/*@*'
-
 
 
   ProviderGetLifestyleFunction:
@@ -1030,6 +1142,22 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
+            # Past the free monthly limit a post spends an extra post (helpers.post_allowance).
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            # The free posts are counted across all four seller tables.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}/index/userId-index'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}/index/userId-index'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}/index/userId-index'
 
   ConsumerPostLifestyleFunction:

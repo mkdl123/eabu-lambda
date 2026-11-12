@@ -54,6 +54,8 @@ ROUTES=(
   "GET /favourites-feed/{userId}/{kind} EabuFavouritesFunction"
   "POST /eabu-ad-purchase EabuAdPurchaseFunction"
   "GET /eabu-ad-purchase/{userId} EabuAdPurchaseFunction"
+  "POST /post-credits EabuPostCreditsFunction"
+  "GET /post-credits/{userId} EabuPostCreditsFunction"
   "POST /apple-iap-notifications EabuAppleNotificationsFunction"
 )
 

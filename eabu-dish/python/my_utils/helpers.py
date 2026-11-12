@@ -225,22 +225,62 @@ def post_expires_at(now=None) -> int:
     return int(now.timestamp()) + POST_TTL_DAYS * 86400
 
 
-# A seller may post at most this many services per category in any 30 days
-# (the app checks first; this is the server-side guard).
+# A seller may post this many services each calendar month for free, in total across
+# all categories; the count resets on the 1st (US Eastern time). The server enforces it.
 MONTHLY_POST_LIMIT = 10
-POST_LIMIT_DAYS = 30
+POST_LIMIT_TIMEZONE = "America/New_York"
 
 
-def post_limit_cutoff(days: int = POST_LIMIT_DAYS) -> str:
-    """createdAt values at or after this string fall inside the post-limit window."""
-    from datetime import timedelta
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+def _month_start(now=None):
+    """Midnight on the 1st of the current month, US Eastern."""
+    from zoneinfo import ZoneInfo
+    local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(POST_LIMIT_TIMEZONE))
+    return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-def recent_post_count(table, user_id: str, days: int = POST_LIMIT_DAYS) -> int:
-    """How many listings this user created in the table in the last `days` days."""
+def post_limit_cutoff(now=None) -> str:
+    """createdAt values at or after this string count toward this month's free posts.
+
+    createdAt is UTC (ISO 8601, with or without "+00:00"), so the cutoff is given in UTC
+    and the strings compare correctly."""
+    return _month_start(now).astimezone(timezone.utc).isoformat()
+
+
+def free_posts_reset_on(now=None) -> str:
+    """The date the free posts next reset, e.g. "2026-12-01"."""
+    start = _month_start(now)
+    return (start.replace(year=start.year + 1, month=1) if start.month == 12
+            else start.replace(month=start.month + 1)).date().isoformat()
+
+
+# The seller post tables; together they hold everything that counts toward the free posts.
+PROVIDER_TABLE_ENV = {
+    "eat": ("EAT_PROVIDER_TABLE_NAME", "eabu-eat-provider"),
+    "live": ("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider"),
+    "move": ("MOVE_PROVIDER_TABLE_NAME", "eabu-move-provider"),
+    "lifestyle": ("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider"),
+}
+_provider_tables = {}
+
+
+def provider_tables() -> dict:
+    """{category: Table} for the four seller post tables (created once per container)."""
+    if not _provider_tables:
+        ddb = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1"))
+        for category, (env, default) in PROVIDER_TABLE_ENV.items():
+            _provider_tables[category] = ddb.Table(os.environ.get(env, default))
+    return _provider_tables
+
+
+def monthly_post_counts(user_id: str) -> dict:
+    """This month's posts per category, e.g. {"eat": 3, "live": 0, "move": 1, "lifestyle": 0}."""
+    return {category: recent_post_count(t, user_id) for category, t in provider_tables().items()}
+
+
+def recent_post_count(table, user_id: str) -> int:
+    """How many listings this user created in the table this month."""
     from boto3.dynamodb.conditions import Attr
-    cutoff = post_limit_cutoff(days)
+    cutoff = post_limit_cutoff()
     kwargs = {
         "IndexName": "userId-index",
         "KeyConditionExpression": Key("userId").eq(str(user_id)),
@@ -257,17 +297,96 @@ def recent_post_count(table, user_id: str, days: int = POST_LIMIT_DAYS) -> int:
 
 
 def post_limit_reached(table, user_id: str):
-    """None while the user may still post here, else a 429 response."""
+    """None while the user may still post here, else a 429 response.
+
+    Past the free limit, a post uses one of the user's extra posts (bought in packs of
+    POSTS_PER_PACK with Apple in-app purchase) when they have any."""
+    return post_allowance(table, user_id)[0]
+
+
+# Extra posts: a seller past the free monthly limit spends one per post. They are
+# bought in packs (the $0.99 consumable `net.eabu.app.posts15`), never expire and
+# work in every category. One row per user {userId, balance}; each credited Apple
+# transaction is also stored ({userId: "tx#<id>"}) so it is never counted twice.
+POSTS_PER_PACK = 15
+_credits_table = None
+
+
+def post_credits_table():
+    global _credits_table
+    if _credits_table is None:
+        _credits_table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+            os.environ.get("POST_CREDITS_TABLE_NAME", "eabu-post-credits"))
+    return _credits_table
+
+
+def _credits_row(user_id: str) -> dict:
+    return post_credits_table().get_item(Key={"userId": str(user_id)}).get("Item") or {}
+
+
+def post_credit_balance(user_id: str) -> int:
+    return int(_credits_row(user_id).get("balance") or 0)
+
+
+def free_post_limit(user_id: str) -> int:
+    """The user's free posts per month (all categories). A `freeLimit` on their credits row
+    overrides MONTHLY_POST_LIMIT (set by hand, e.g. 1 for a test account)."""
     try:
-        if recent_post_count(table, user_id) < MONTHLY_POST_LIMIT:
-            return None
+        override = _credits_row(user_id).get("freeLimit")
+    except (BotoCoreError, ClientError):
+        logger.exception("Could not read the free post limit; using the default")
+        return MONTHLY_POST_LIMIT
+    return int(override) if override is not None else MONTHLY_POST_LIMIT
+
+
+def spend_post_credit(user_id: str) -> bool:
+    """Take one extra post from the user's balance; False when they have none."""
+    try:
+        post_credits_table().update_item(
+            Key={"userId": str(user_id)},
+            UpdateExpression="ADD balance :minus",
+            ConditionExpression="balance >= :one",
+            ExpressionAttributeValues={":minus": -1, ":one": 1})
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def refund_post_credit(user_id: str) -> None:
+    """Give back an extra post spent on a post that then failed to save."""
+    try:
+        post_credits_table().update_item(Key={"userId": str(user_id)},
+                                         UpdateExpression="ADD balance :one",
+                                         ExpressionAttributeValues={":one": 1})
+    except (BotoCoreError, ClientError):
+        logger.exception("Could not refund an extra post")
+
+
+def post_allowance(table, user_id: str):
+    """(None, spent) while the user may post here, else (429 or 500 response, False).
+
+    The free posts are counted across all categories, so `table` (the category being
+    posted to) doesn't change the answer. `spent` is True when the post uses an extra
+    post; if saving the post then fails, call refund_post_credit so the user doesn't
+    lose it."""
+    try:
+        limit = free_post_limit(user_id)
+        if sum(monthly_post_counts(user_id).values()) < limit:
+            return None, False
+        if spend_post_credit(user_id):
+            return None, True
     except (BotoCoreError, ClientError):
         logger.exception("Could not check the post limit")
-        return _response(500, {"msg": "Could not create the post. Please try again."})
+        return _response(500, {"msg": "Could not create the post. Please try again."}), False
     return _response(429, {
-        "msg": f"You already posted {MONTHLY_POST_LIMIT} services in this category in the last {POST_LIMIT_DAYS} days.",
+        "msg": f"You already used your {limit} free posts this month.",
         "code": "POST_LIMIT",
-    })
+        "canBuyMore": True,
+        "postsPerPack": POSTS_PER_PACK,
+        "resetsOn": free_posts_reset_on(),
+    }), False
 
 
 def optional_address(payload: dict):

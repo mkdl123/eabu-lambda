@@ -35,6 +35,7 @@ def make_tables():
             tables[f"{category}-{kind}"] = table(
                 ddb, f"eabu-{category}-{kind}", [("ID", "HASH"), ("cUserId", "RANGE")], [("ID", "N"), ("cUserId", "S")])
     tables["lifestyle-offer"] = table(ddb, "eabu-lifestyle-offer", keys, attrs + [("itemId", "N")], [user, user_item])
+    tables["post-credits"] = table(ddb, "eabu-post-credits", [("userId", "HASH")], [("userId", "S")])
     return tables
 
 
@@ -205,6 +206,11 @@ def test_template_grants_each_function_only_lifestyle_tables():
         assert f"CodeUri: eabu-dish/{folder}\n" in block
         assert os.path.exists(os.path.join(ROOT, "eabu-dish", folder, "app.py"))
         assert f"table/${{{table_param}TableName}}" in block
+        # The one exception: posting counts this month's free posts across all four seller
+        # tables, a read-only Query on their userId-index.
+        block = re.sub(r"            # The free posts are counted across all four seller tables\.\n"
+                       r"            - Effect: Allow\n              Action:\n                - dynamodb:Query\n"
+                       r"              Resource:\n(?:                - .*userId-index'\n){4}", "", block)
         assert not re.search(r"table/\$\{(Eat|Live|Move)", block), logical
 
 
@@ -242,15 +248,15 @@ def test_address_is_shown_on_seller_profile():
 
 @mock_aws
 @pytest.mark.parametrize("category", ["eat", "live", "move", "lifestyle"])
-def test_seller_post_limit_is_ten_per_30_days(category):
+def test_seller_post_limit_is_ten_per_month_in_total(category):
     from datetime import datetime, timedelta, timezone
     tables = make_tables()
     fn = load(f"provider-post-{category}")
     payload = lambda user="seller": post({"zipcode": ZIP, "title": "T", "description": "D", "phone": "6105550100",
                                           "userId": user, **LOCATION})
 
-    # Posts older than 30 days don't count.
-    old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    # Posts from before this month don't count.
+    old = (datetime.now(timezone.utc) - timedelta(days=32)).isoformat()
     for i in range(5):
         tables[f"{category}-provider"].put_item(Item={"zipcode": ZIP, "ID": 5000 + i, "userId": "seller", "createdAt": old})
 
@@ -264,7 +270,8 @@ def test_seller_post_limit_is_ten_per_30_days(category):
 
     assert fn.lambda_handler(payload("other-seller"), None)["statusCode"] == 200, "limits are per seller"
     other = "eat" if category != "eat" else "live"
-    assert load(f"provider-post-{other}").lambda_handler(payload(), None)["statusCode"] == 200, "and per category"
+    res = load(f"provider-post-{other}").lambda_handler(payload(), None)
+    assert res["statusCode"] == 429, "the 10 free posts are shared by all categories"
 
 
 @mock_aws
@@ -274,7 +281,7 @@ def test_repost_of_expired_listing_respects_post_limit(monkeypatch):
     t = tables["eat-provider"]
     now = datetime.now(timezone.utc)
     old = (now - timedelta(days=40)).isoformat()
-    recent = (now - timedelta(days=2)).isoformat()
+    recent = now.isoformat()   # this month, whatever today's date
     t.put_item(Item={"zipcode": ZIP, "ID": 900, "userId": "seller", "createdAt": old})       # expired
     t.put_item(Item={"zipcode": ZIP, "ID": 901, "userId": "seller", "createdAt": recent})    # live
     repost = lambda item_id, user="seller": load("provider-repost").lambda_handler(

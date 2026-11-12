@@ -1,4 +1,5 @@
-"""Apple in-app purchase checks for paid ads (the $9.99 / 3-month auto-renewing subscription).
+"""Apple in-app purchase checks: paid ads (the $9.99 / 3-month auto-renewing subscription)
+and extra posts (the $0.99 consumable pack).
 
 Only the functions that take payments import this module, and only they list
 app-store-server-library in their requirements, so the other functions stay small.
@@ -33,6 +34,11 @@ def bundle_id():
 
 def product_id():
     return os.environ.get("AD_PRODUCT_ID", "net.eabu.app.ad.quarterly")
+
+
+def posts_product_id():
+    """The $0.99 consumable that adds helpers.POSTS_PER_PACK extra posts."""
+    return os.environ.get("POSTS_PRODUCT_ID", "net.eabu.app.posts15")
 
 
 def account_token(user_id):
@@ -136,3 +142,13 @@ def check_ad_purchase(tx, user_id, now=None):
         raise PurchaseError("purchase was refunded or revoked")
     if tx["expiresAt"] <= now:
         raise PurchaseError("subscription has expired")
+
+
+def check_posts_purchase(tx, user_id):
+    """Raise PurchaseError unless tx is an extra-posts pack bought by user_id."""
+    if tx["bundleId"] != bundle_id() or tx["productId"] != posts_product_id():
+        raise PurchaseError("not an Eabu extra-posts pack")
+    if tx["appAccountToken"] != account_token(user_id):
+        raise PurchaseError("purchase belongs to another account")
+    if tx["revoked"]:
+        raise PurchaseError("purchase was refunded or revoked")

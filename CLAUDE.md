@@ -109,6 +109,16 @@ Advertisers pay $9.99 for 3 months through an auto-renewing App Store subscripti
 
 `GET /eabu-ad/active` returns paid ads with a future `paidThrough` regardless of `?zip`, flagged `nationwide: true`. To take a paid ad down, set its `status` to `removed`; neither a purchase nor a renewal brings it back. Production purchases are verified with the app's Apple ID (`AppAppleId`, 6833603481). Sandbox purchases (TestFlight, App Review) are accepted while `IapAllowSandbox` is `"true"`. The lookups scan the ad table, which is fine while it holds a few hundred rows.
 
+### Extra posts (Apple in-app consumable)
+
+Sellers get `helpers.MONTHLY_POST_LIMIT` (10) free posts each calendar month in total across all four categories (`helpers.monthly_post_counts` queries every seller table, so each post function may Query all four `userId-index`es); the count resets on the 1st, US Eastern (`helpers.post_limit_cutoff`, `free_posts_reset_on`). Reposting a listing from before this month counts as a post. Past that, each post spends one **extra post**. Extra posts are bought in packs of `helpers.POSTS_PER_PACK` (15) for $0.99, with the consumable `net.eabu.app.posts15` (template parameter `PostsProductId`). They never expire (App Review guideline 3.1.1 forbids expiring paid credits) and work in every category.
+
+- `eabu-post-credits` (table, `scripts/create-post-credits-table.sh`, outside the stack) holds `{userId, balance, purchased}` per seller, plus one row per credited Apple transaction (`userId = "tx#<transactionId>"`), so a replayed purchase is never counted twice.
+- `helpers.post_allowance(table, user_id)` returns `(response, spent)`: it lets the post through under the free limit, otherwise spends one extra post atomically, otherwise returns 429 `POST_LIMIT` with `canBuyMore`. If saving the post then fails, the caller calls `helpers.refund_post_credit`.
+- `GET /post-credits/{userId}` returns the balance, this month's posts (`usedTotal`, and `used` per category), `freeLimit`, `resetsOn`, `productId` and `appAccountToken`; the app's posting screen works from it. `POST /post-credits` receives the signed transaction, verifies it (`apple_iap.check_posts_purchase`) and adds the pack (function `eabu-post-credits`).
+- A `freeLimit` number on a seller's credits row overrides the free limit for that account only (`helpers.free_post_limit`; the app reads it from `GET /post-credits`). Used to test with a low limit; remove the attribute to restore 10.
+- A `REFUND`/`REVOKE` notification for the pack (`eabu-apple-notifications`) takes its posts back, never below zero.
+
 ### Function naming conventions
 
 Functions follow a `{role}-{action}-{category}` pattern:

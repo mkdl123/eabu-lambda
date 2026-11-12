@@ -43,7 +43,7 @@ def lambda_handler(event, context):
     if denied:
         return denied
     # At most helpers.MONTHLY_POST_LIMIT posts per category in 30 days (sellers can't delete posts).
-    limited = helpers.post_limit_reached(table, payload["userId"])
+    limited, spent_credit = helpers.post_allowance(table, payload["userId"])
     if limited:
         return limited
     logger.info("userId=%s", payload["userId"] if isinstance(payload["userId"], str) else str(payload["userId"]));
@@ -78,6 +78,8 @@ def lambda_handler(event, context):
         table.put_item(Item=item)
     except (BotoCoreError, ClientError) as e:
         logger.exception("Failed to write item to DynamoDB")
+        if spent_credit:
+            helpers.refund_post_credit(payload["userId"])
         return helpers._response(500, {"msg": "Failed to create dish"})
 
     return helpers._response(200, {"message": "Recipe posted ", "ID": item["ID"]})
