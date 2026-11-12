@@ -202,3 +202,24 @@ def test_identity_failure_does_not_stop_deletion(monkeypatch):
     event["headers"] = {"authorization": "Bearer x"}
     assert fn.lambda_handler(event, None)["statusCode"] == 200
     assert users_in(cognito, pool) == ["bob"]
+
+
+@mock_aws
+@pytest.mark.parametrize("deleted_on, shown", [
+    ("2026-11-12 15:00", "December 12, 2026"),
+    ("2027-01-20 09:30", "February 19, 2027"),
+    ("2028-02-10 23:00", "March 11, 2028"),  # leap year: Feb has 29 days
+])
+def test_message_date_is_30_days_after_that_users_deletion(monkeypatch, deleted_on, shown):
+    from datetime import datetime, timezone
+    t, s3, cognito, pool = setup(monkeypatch)
+    when = datetime.strptime(deleted_on, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
+    fn = load("eabu-delete-user-info")
+    monkeypatch.setattr(fn.time, "time", lambda: when)
+    fn.lambda_handler(as_user(post({"userId": "alice"}), "alice"), None)
+
+    trigger = load("eabu-pre-signup")
+    monkeypatch.setattr(trigger.time, "time", lambda: when + 86400)  # trying again the next day
+    with pytest.raises(trigger.EmailBlocked) as refused:
+        trigger.lambda_handler(signup_event("alice@example.com"), None)
+    assert f"You can use it again from {shown}." in str(refused.value)
