@@ -94,6 +94,23 @@ def test_buyer_request_receives_seller_offer():
 
 
 @mock_aws
+def test_seller_may_offer_once_per_request():
+    make_tables()
+    item_id = post_request()
+    offer = load("provider-offer-lifestyle")
+    assert offer.lambda_handler(post(offer_payload(item_id)), None)["statusCode"] == 200
+    again = offer.lambda_handler(post(offer_payload(item_id)), None)
+    assert again["statusCode"] == 409
+    assert body(again)["code"] == "ALREADY_OFFERED"
+    other_seller = {**offer_payload(item_id), "pUserId": "seller2"}
+    assert offer.lambda_handler(post(other_seller), None)["statusCode"] == 200
+    second_request = post_request()
+    assert offer.lambda_handler(post(offer_payload(second_request)), None)["statusCode"] == 200
+    offers = load("consumer-lifestyle-offers")
+    assert body(offers.lambda_handler(get(userId="buyer", itemId=str(item_id)), None))["Count"] == 2
+
+
+@mock_aws
 def test_offer_keeps_what_one_unit_is():
     make_tables()
     item_id = post_request()

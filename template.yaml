@@ -728,6 +728,8 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}/index/*'
+                # One offer per seller per request: look up existing offers on the request.
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatOfferTableName}/index/*'
 
   LiveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -748,6 +750,8 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}/index/*'
+                # One offer per seller per request: look up existing offers on the request.
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveOfferTableName}/index/*'
 
   MoveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -768,6 +772,8 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}/index/*'
+                # One offer per seller per request: look up existing offers on the request.
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveOfferTableName}/index/*'
 
   ConsumerReceivedMoveOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -1214,6 +1220,8 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}/index/*'
+                # One offer per seller per request: look up existing offers on the request.
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleOfferTableName}/index/*'
 
   ConsumerReceivedLifestyleOfferFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

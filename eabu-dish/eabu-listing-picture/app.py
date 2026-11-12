@@ -1,4 +1,4 @@
-"""Up to two pictures per seller service listing: upload (replacing that slot) or delete.
+"""Up to four pictures per seller service listing: upload (replacing that slot) or delete.
 
 POST   /listing-picture
        body {"category": "eat|live|move|lifestyle", "zipcode", "itemId", "slot": "1"|"2",
@@ -73,7 +73,7 @@ def _listing_target(event, category, zipcode, item_id, slot):
     if category not in helpers.LISTING_CATEGORIES:
         return None, helpers._response(400, {"msg": "Invalid category"})
     if str(slot) not in helpers.PICTURE_SLOTS:
-        return None, helpers._response(400, {"msg": "slot must be 1 or 2"})
+        return None, helpers._response(400, {"msg": "slot must be 1 to 4"})
     if not isinstance(zipcode, str) or not zipcode or len(zipcode) > 10:
         return None, helpers._response(400, {"msg": "Invalid zipcode"})
     try:

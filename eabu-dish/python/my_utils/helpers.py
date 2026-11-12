@@ -152,15 +152,15 @@ def is_owner(event, user_id) -> bool:
 # Listing fields anyone signed in may see on a seller's profile. Everything else
 # (phone, exact coordinates, interested_by, ...) is for the owner only.
 PUBLIC_LISTING_FIELDS = ("ID", "zipcode", "userId", "title", "description",
-                         "address", "picture1", "picture2", "pictures",
+                         "address", "picture1", "picture2", "picture3", "picture4", "pictures",
                          "totalstars", "ratingscount", "createdAt")
 
 
-# Sellers may add up to two pictures to each service listing. They live in the
+# Sellers may add up to four pictures to each service listing. They live in the
 # (private) picture bucket at listings/{category}/{ID}/{slot}.jpg, and the listing
-# row records each one as picture1/picture2 = upload time.
+# row records each one as picture1..picture4 = upload time.
 LISTING_CATEGORIES = ("eat", "live", "move", "lifestyle")
-PICTURE_SLOTS = ("1", "2")
+PICTURE_SLOTS = ("1", "2", "3", "4")
 PICTURE_URL_SECONDS = 3600
 _s3_client = None
 
@@ -444,6 +444,21 @@ def user_has_item(table, user_id: str, item_id: int) -> bool:
         if "LastEvaluatedKey" not in response:
             return False
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+
+def already_offered(offer_table, buyer_id: str, item_id: int, seller_id: str) -> bool:
+    """True if seller_id has already made an offer on buyer_id's request item_id.
+
+    Sellers may offer once per request; offers are found through the offer table's
+    userId-itemId-index (userId is the buyer).
+    """
+    result = query_all(
+        offer_table,
+        IndexName="userId-itemId-index",
+        KeyConditionExpression="userId = :u AND itemId = :i",
+        ExpressionAttributeValues={":u": str(buyer_id), ":i": int(item_id)},
+    )
+    return any(str(o.get("pUserId")) == str(seller_id) for o in result.get("Items", []))
 
 
 def increment_counter(partition_key, table, counter_attribute='total_count'):

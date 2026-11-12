@@ -57,6 +57,10 @@ def lambda_handler(event, context):
         item_id = int(payload["itemId"])
         if not helpers.user_has_item(consumer_table, str(payload["userId"]), item_id):
             return helpers._response(404, {"msg": "Request not found"})
+        # A seller may make only one offer per request.
+        if helpers.already_offered(table, str(payload["userId"]), item_id, str(payload["pUserId"])):
+            return helpers._response(409, {"msg": "You have already made an offer on this request.",
+                                           "code": "ALREADY_OFFERED"})
     except (TypeError, ValueError):
         return helpers._response(400, {"msg": "itemId must be an integer"})
     except (BotoCoreError, ClientError):

@@ -1,4 +1,4 @@
-"""Seller listing pictures: two slots per listing, owner-only changes, links on reads."""
+"""Seller listing pictures: four slots per listing, owner-only changes, links on reads."""
 import base64, io, json, os
 
 import boto3
@@ -83,12 +83,22 @@ def test_only_the_owner_can_change_pictures():
 
 
 @mock_aws
+def test_four_picture_slots():
+    _, s3, item_id = setup()
+    fn = load("eabu-listing-picture")
+    for slot in ("1", "2", "3", "4"):
+        assert fn.lambda_handler(upload(item_id, slot=slot), None)["statusCode"] == 200
+    keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", []))
+    assert keys == [f"listings/eat/{item_id}/{s}.jpg" for s in ("1", "2", "3", "4")]
+
+
+@mock_aws
 def test_rejects_bad_input():
     _, s3, item_id = setup()
     fn = load("eabu-listing-picture")
     code = lambda e: fn.lambda_handler(e, None)["statusCode"]
 
-    assert code(upload(item_id, slot="3")) == 400
+    assert code(upload(item_id, slot="5")) == 400
     assert code(upload(item_id, category="dish")) == 400
     assert code(upload("../x")) == 400
     assert code(upload(100)) == 400, "the counter row is not a listing"

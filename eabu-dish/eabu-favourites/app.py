@@ -56,7 +56,7 @@ MAX_PAGE_SIZE = 50
 SCAN_CACHE_SECONDS = 60
 _scan_cache = {}  # table name -> (time scanned, cutoff used, items)
 FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "phone",
-               "totalstars", "ratingscount", "createdAt", "picture1", "picture2")
+               "totalstars", "ratingscount", "createdAt", "picture1", "picture2", "picture3", "picture4")
 
 
 def _table_for(kind, category):
