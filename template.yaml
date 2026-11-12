@@ -69,6 +69,8 @@ Globals:
           Ref: LifestyleRatedTableName
         FAVOURITES_TABLE_NAME:
           Ref: FavouritesTableName
+        BLOCKED_EMAILS_TABLE_NAME:
+          Ref: BlockedEmailsTableName
         IDENTITY_BUCKET_NAME:
           Ref: IdentityBucketName
         SENDER_EMAIL:
@@ -214,6 +216,11 @@ Parameters:
     Type: String
     Default: eabu@eabu.net
 
+  BlockedEmailsTableName:
+    Type: String
+    Default: eabu-blocked-emails
+    Description: Hashed emails of recently deleted accounts (scripts/create-blocked-emails-table.sh).
+
   UserPoolId:
     Type: String
     Default: us-east-1_G0VobzUMd
@@ -324,6 +331,12 @@ Resources:
                 - dynamodb:PutItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuDeleteTableName}'
+            # Block the deleted account's email from signing up again for 30 days.
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${BlockedEmailsTableName}'
             # Purchase records are kept but unlinked from the deleted user.
             - Effect: Allow
               Action:
@@ -359,6 +372,30 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
+  # Cognito pre sign-up trigger (no API route): refuses sign-ups with a recently deleted
+  # account's email. Attached to the user pool by scripts/attach-pre-signup-trigger.py.
+  EabuPreSignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-pre-signup
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${BlockedEmailsTableName}'
+
+  EabuPreSignupCognitoPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt EabuPreSignupFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cognito-idp:${Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+
   EabuServiceRequestFunctionName:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:

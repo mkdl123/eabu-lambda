@@ -47,6 +47,7 @@ def setup(monkeypatch):
     t["feedback"] = make_table(ddb, "eabu-feedback", [("createdAt", "HASH"), ("ID", "RANGE")],
                                [("createdAt", "S"), ("ID", "N")])
     t["delete"] = make_table(ddb, "eabu-delete", [("userId", "HASH")], [("userId", "S")])
+    t["blocked"] = make_table(ddb, "eabu-blocked-emails", [("emailHash", "HASH")], [("emailHash", "S")])
 
     s3 = boto3.client("s3", region_name=REGION)
     s3.create_bucket(Bucket=BUCKET)
@@ -123,6 +124,11 @@ def test_delete_account_removes_only_the_callers_data(monkeypatch):
     assert t["delete"].scan()["Count"] == 0
     assert t["eat-consumer"].get_item(Key={"zipcode": "11111", "ID": 100}).get("Item"), "counter row kept"
 
+    blocked = t["blocked"].scan()["Items"]
+    assert [b["emailHash"] for b in blocked] == [fn.helpers.email_hash("alice@example.com")]
+    assert "alice" not in str(blocked).lower(), "only a hash of the email is stored"
+    assert 29 * 86400 < int(blocked[0]["expiresAt"]) - int(blocked[0]["blockedAt"]) <= 30 * 86400
+
     again = fn.lambda_handler(as_user(post({"userId": "alice"}), "alice"), None)
     assert again["statusCode"] == 200, "deleting again is harmless"
 
@@ -135,3 +141,36 @@ def test_cannot_delete_someone_else(monkeypatch):
     assert fn.lambda_handler(post({"userId": "bob"}), None)["statusCode"] == 401
     assert users_in(cognito, pool) == ["alice", "bob"]
     assert owners(t["eat-provider"]) == ["alice", "bob"]
+
+
+def signup_event(email, source="PreSignUp_SignUp"):
+    return {"triggerSource": source, "request": {"userAttributes": {"email": email}}, "response": {}}
+
+
+@mock_aws
+def test_deleted_email_cannot_sign_up_for_30_days(monkeypatch):
+    t, s3, cognito, pool = setup(monkeypatch)
+    load("eabu-delete-user-info").lambda_handler(as_user(post({"userId": "alice"}), "alice"), None)
+    trigger = load("eabu-pre-signup")
+
+    with pytest.raises(trigger.EmailBlocked) as refused:
+        trigger.lambda_handler(signup_event(" ALICE@example.com"), None)
+    assert "sign up with it again from" in str(refused.value)
+    assert trigger.lambda_handler(signup_event("bob2@example.com"), None)["triggerSource"] == "PreSignUp_SignUp"
+    assert trigger.lambda_handler(signup_event("alice@example.com", "PreSignUp_AdminCreateUser"), None), \
+        "support can still create the account"
+
+    # Once the 30 days are over (TTL may not have removed the row yet) the email works again.
+    row = t["blocked"].scan()["Items"][0]
+    t["blocked"].put_item(Item={**row, "expiresAt": int(row["blockedAt"]) - 1})
+    assert trigger.lambda_handler(signup_event("alice@example.com"), None)
+
+
+def test_signup_allowed_if_the_check_breaks(monkeypatch):
+    trigger = load("eabu-pre-signup")
+    from botocore.exceptions import ClientError
+
+    def broken(**kwargs):
+        raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "x"}}, "GetItem")
+    monkeypatch.setattr(trigger.blocked_emails, "get_item", broken)
+    assert trigger.lambda_handler(signup_event("anyone@example.com"), None)

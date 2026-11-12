@@ -9,6 +9,10 @@ The signed-in user can delete only themselves. In one go this removes:
   - their profile picture;
   - their Cognito sign-in account (last, so a failure part-way can be retried by tapping again).
 
+Their email is then blocked from signing up again for helpers.EMAIL_BLOCK_DAYS (the
+eabu-pre-signup Cognito trigger checks it). Only a hash of the email is kept, and DynamoDB
+TTL removes it when the block ends.
+
 Apple purchase records (tx# rows) are kept so a replayed purchase can't be credited twice,
 but they lose their link to the user. A paid ad subscription keeps renewing with Apple
 until the user cancels it in their Apple ID settings; the app tells them so.
@@ -19,6 +23,7 @@ a request that came in by email.
 """
 import logging
 import os
+import time
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -59,6 +64,7 @@ identity = _table("EABU_IDENTITY_TABLE_NAME", "eabu-identity")
 service_requests = _table("EABU_SERVICE_REQUEST_TABLE", "eabu-service-request")
 feedback = _table("EABU_FEEDBACK_TABLE_NAME", "eabu-feedback")
 delete_requests = _table("EABU_DELETE_TABLE", "eabu-delete")
+blocked_emails = _table("BLOCKED_EMAILS_TABLE_NAME", "eabu-blocked-emails")
 
 
 def _scan_all(table, **kwargs):
@@ -151,6 +157,11 @@ def delete_user(user_id: str) -> dict:
         counts["feedback"] = _delete_rows(feedback, rows, ("createdAt", "ID"))
 
     s3.delete_object(Bucket=BUCKET, Key=f"{user_id}/profile.jpg")
+
+    if email:
+        now = int(time.time())
+        blocked_emails.put_item(Item={"emailHash": helpers.email_hash(email), "blockedAt": now,
+                                      "expiresAt": now + helpers.EMAIL_BLOCK_DAYS * 86400})
 
     # Last: the sign-in account. Until this succeeds the user can sign in and try again.
     try:

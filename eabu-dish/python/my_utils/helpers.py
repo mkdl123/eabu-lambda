@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import functools
+import hashlib
 import math
 import re
 import logging
@@ -218,6 +219,14 @@ def refresh_listing_pictures(item, category: str):
 # deletes them that long after they were created or last reposted, and the picture bucket's
 # lifecycle rule deletes listings/ pictures on the same schedule.
 POST_TTL_DAYS = 60
+
+# After an account is deleted its email can't be used to sign up again for this long.
+# The block stores only a SHA-256 of the normalised email, never the address itself.
+EMAIL_BLOCK_DAYS = 30
+
+
+def email_hash(email: str) -> str:
+    return hashlib.sha256(str(email).strip().lower().encode("utf-8")).hexdigest()
 
 
 def post_expires_at(now=None) -> int:
