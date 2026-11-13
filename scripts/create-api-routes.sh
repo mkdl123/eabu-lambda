@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Add routes to the hand-managed REST API behind api.eabu.net (Lifestyle, profile
-# picture, listing picture, favourites and paid-ad routes). Each route gets the Cognito authorizer
+# picture, listing picture, favourites, paid-ad and report routes). Each route gets the Cognito authorizer
 # (except PUBLIC_ROUTES), a Lambda proxy integration and
 # a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
 # RETIRED_ROUTES (the old identity/selfie upload, the
@@ -56,6 +56,7 @@ ROUTES=(
   "GET /eabu-ad-purchase/{userId} EabuAdPurchaseFunction"
   "POST /post-credits EabuPostCreditsFunction"
   "GET /post-credits/{userId} EabuPostCreditsFunction"
+  "POST /report EabuReportFunction"
   "POST /apple-iap-notifications EabuAppleNotificationsFunction"
 )
 

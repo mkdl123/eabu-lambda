@@ -173,10 +173,12 @@ def delete_user(user_id: str) -> dict:
     identity.delete_item(Key={"userId": user_id})
     rows = helpers.query_all(service_requests, KeyConditionExpression=Key("userId").eq(user_id))["Items"]
     counts["service_requests"] = _delete_rows(service_requests, rows, ("userId", "serviceType"))
-    if email:
-        rows = [r for r in _scan_all(feedback)
-                if str(r.get("email", "")).strip().lower() == email.strip().lower()]
-        counts["feedback"] = _delete_rows(feedback, rows, ("createdAt", "ID"))
+    # Feedback sent with their email, and content reports they made.
+    mail = (email or "").strip().lower()
+    rows = [r for r in _scan_all(feedback)
+            if (mail and str(r.get("email", "")).strip().lower() == mail)
+            or r.get("reporterUserId") == user_id]
+    counts["feedback"] = _delete_rows(feedback, rows, ("createdAt", "ID"))
 
     s3.delete_object(Bucket=BUCKET, Key=f"{user_id}/profile.jpg")
 

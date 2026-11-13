@@ -216,6 +216,11 @@ Parameters:
     Type: String
     Default: eabu@eabu.net
 
+  ReportEmail:
+    Type: String
+    Default: mdas@eabu.net
+    Description: Where content reports (POST /report) are emailed for review. Must be an @eabu.net address while SES is in the sandbox.
+
   BlockedEmailsTableName:
     Type: String
     Default: eabu-blocked-emails
@@ -1210,6 +1215,29 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+
+  # Report a post, request, offer, ad or profile (App Store guideline 1.2): saved + emailed for review.
+  EabuReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-report
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          REPORT_EMAIL: !Ref ReportEmail
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuFeedbackTableName}'
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/eabu.net'
 
   # Daily: emails advertisers 5 days before their ad renews, hides lapsed paid ads.
   EabuAdReminderFunction:

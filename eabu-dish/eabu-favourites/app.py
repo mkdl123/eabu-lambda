@@ -16,8 +16,9 @@ sort key of the last post sent, so posts added meanwhile don't shift or repeat l
 Without ?limit the whole list comes back as before.
 
 kind is "seller" (a buyer's favourite sellers: their service listings) or "buyer" (a seller's
-favourite buyers: their requests). Favourites are private: only the user can read or change
-their own. Feed posts are newest first, each with distanceMiles from ?zip.
+favourite buyers: their requests). The list routes also take kind "blocked" (users the caller
+has blocked, up to 500); blocked users' posts never appear in the caller's feeds. Favourites are
+private: only the user can read or change their own. Feed posts are newest first, each with distanceMiles from ?zip.
 """
 import base64
 import binascii
@@ -42,8 +43,12 @@ region = os.environ.get("REGION_NAME", "us-east-1")
 dynamodb = boto3.resource("dynamodb", region_name=region)
 favourites = dynamodb.Table(os.environ.get("FAVOURITES_TABLE_NAME", "eabu-favourites"))
 
-KINDS = ("seller", "buyer")
+# "blocked" = users the caller has blocked (App Store guideline 1.2). Their posts are left out
+# of the caller's feeds; the app also hides them from every other list.
+KINDS = ("seller", "buyer", "blocked")
+FEED_KINDS = ("seller", "buyer")
 MAX_FAVOURITES = 50
+MAX_BLOCKED = 500
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_@.+:-]{1,128}$")
 CATEGORIES = ("eat", "live", "move", "lifestyle")
 # seller -> their service listings (provider tables); buyer -> their requests (consumer tables)
@@ -75,12 +80,12 @@ def _decimal(obj):
     raise TypeError(type(obj).__name__)
 
 
-def _check(event, user_id, kind, fav_user_id=None):
+def _check(event, user_id, kind, fav_user_id=None, kinds=KINDS):
     """Validate ids/kind and that the caller is user_id. Returns an error response or None."""
     if not isinstance(user_id, str) or not USER_ID_PATTERN.match(user_id):
         return helpers._response(400, {"msg": "Invalid userId"})
-    if kind not in KINDS:
-        return helpers._response(400, {"msg": "kind must be seller or buyer"})
+    if kind not in kinds:
+        return helpers._response(400, {"msg": f"kind must be {' or '.join(kinds)}"})
     if fav_user_id is not None and (not isinstance(fav_user_id, str) or not USER_ID_PATTERN.match(fav_user_id)):
         return helpers._response(400, {"msg": "Invalid favUserId"})
     return helpers.authorize_user(event, user_id)
@@ -114,12 +119,14 @@ def add_favourite(event):
     if denied:
         return denied
     if fav == user_id:
-        return helpers._response(400, {"msg": "You can't add yourself as a favourite"})
+        return helpers._response(400, {"msg": "You can't add yourself"})
     current = _list(user_id, kind)
     if any(i["favUserId"] == fav for i in current):
-        return _json(200, {"message": "Already a favourite", "favUserId": fav})
-    if len(current) >= MAX_FAVOURITES:
-        return helpers._response(400, {"msg": f"You can save up to {MAX_FAVOURITES} favourites"})
+        return _json(200, {"message": "Already saved", "favUserId": fav})
+    limit = MAX_BLOCKED if kind == "blocked" else MAX_FAVOURITES
+    if len(current) >= limit:
+        what = "blocked users" if kind == "blocked" else "favourites"
+        return helpers._response(400, {"msg": f"You can save up to {limit} {what}"})
     favourites.put_item(Item={"userId": user_id, "favKey": f"{kind}#{fav}", "kind": kind, "favUserId": fav,
                               "createdAt": datetime.now(timezone.utc).isoformat()})
     return _json(200, {"message": "Favourite saved", "favUserId": fav})
@@ -186,15 +193,22 @@ def _attach_pictures(posts):
         helpers.attach_picture_urls([p for p in posts if p["category"] == category], category)
 
 
+def _blocked_ids(user_id):
+    return {b["favUserId"] for b in _list(user_id, "blocked")}
+
+
 def feed(event, user_id, kind):
-    denied = _check(event, user_id, kind)
+    denied = _check(event, user_id, kind, kinds=FEED_KINDS)
     if denied:
         return denied
     limit, after = _paging(event)
     zip_code = str(((event.get("queryStringParameters") or {}).get("zip") or "")).strip()[:10]
     cutoff = helpers.post_limit_cutoff()
     posts = []
+    blocked = _blocked_ids(user_id)
     for fav in _list(user_id, kind):
+        if fav["favUserId"] in blocked:
+            continue
         for category in CATEGORIES:
             table = _table_for(kind, category)
             kwargs = {"IndexName": "userId-index",
@@ -246,18 +260,19 @@ def _recent_posts_uncached(table, cutoff):
 
 def nearby_feed(event, user_id, kind, zip_code):
     """Everyone's current posts within NEARBY_MILES of zip_code, newest first, favourites flagged."""
-    denied = _check(event, user_id, kind)
+    denied = _check(event, user_id, kind, kinds=FEED_KINDS)
     if denied:
         return denied
     if not zip_code:
         return helpers._response(400, {"msg": "zip is required"})
     limit, after = _paging(event)
     fav_ids = {f["favUserId"] for f in _list(user_id, kind)}
+    skip = _blocked_ids(user_id) | {user_id}
     cutoff = helpers.post_limit_cutoff()
     posts = []
     for category in CATEGORIES:
         found = [{k: i[k] for k in FEED_FIELDS if k in i}
-                 for i in _recent_posts(_table_for(kind, category), cutoff) if i.get("userId") != user_id]
+                 for i in _recent_posts(_table_for(kind, category), cutoff) if i.get("userId") not in skip]
         found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
         posts += [{**p, "category": category, "isFavourite": p.get("userId") in fav_ids} for p in found]
     posts, next_cursor = _page(posts, limit, after)
