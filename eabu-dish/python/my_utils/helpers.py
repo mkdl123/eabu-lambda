@@ -19,9 +19,12 @@ FIELD_LIMITS = {
     "zipcode": 10, "zip": 10, "userId": 128, "pUserId": 128, "cUserId": 128,
     "title": 200, "description": 5000, "offerDescription": 5000, "message": 5000,
     "phone": 32, "phoneNumber": 32, "email": 254, "price": 32, "unit": 40, "serviceType": 100,
-    "latitude": 32, "longitude": 32, "address": 200,
+    "latitude": 32, "longitude": 32, "address": 200, "addressLat": 32, "addressLng": 32,
 }
 COORDINATE_FIELDS = ("latitude", "longitude")
+# Where the poster's optional address is (looked up by the app). Unlike latitude/longitude
+# (the poster's phone), these are never rounded: the poster chose to publish the address.
+ADDRESS_COORDINATE_FIELDS = ("addressLat", "addressLng")
 MAX_NUMBER_LENGTH = 32  # DynamoDB numbers hold 38 digits at most
 
 def _parse_body(event) -> dict:
@@ -56,7 +59,8 @@ def _validate_fields(payload: dict):
         value = payload.get(field)
         if value is None:
             continue
-        allowed = (str, int, float) if field in COORDINATE_FIELDS else (str, int)
+        numeric = field in COORDINATE_FIELDS or field in ADDRESS_COORDINATE_FIELDS
+        allowed = (str, int, float) if numeric else (str, int)
         if isinstance(value, bool) or not isinstance(value, allowed):
             raise ValueError(f"{field} has an invalid type")
         if len(str(value)) > (limit if isinstance(value, str) else MAX_NUMBER_LENGTH):
@@ -153,7 +157,7 @@ def is_owner(event, user_id) -> bool:
 # Listing fields anyone signed in may see on a seller's profile. Everything else
 # (phone, exact coordinates, interested_by, ...) is for the owner only.
 PUBLIC_LISTING_FIELDS = ("ID", "zipcode", "userId", "title", "description",
-                         "address", "picture1", "picture2", "picture3", "picture4", "pictures",
+                         "address", "addressLat", "addressLng", "picture1", "picture2", "picture3", "picture4", "pictures",
                          "totalstars", "ratingscount", "createdAt")
 
 
@@ -405,6 +409,25 @@ def optional_address(payload: dict):
         return None
     value = " ".join(value.split())
     return value or None
+
+
+def address_location(payload: dict) -> dict:
+    """{"addressLat", "addressLng"} (strings, 6 places) for the post's address pin on the map;
+    {} unless both are valid coordinates. Bad values are dropped, not fatal: the post still saves."""
+    try:
+        lat = float(payload.get("addressLat"))
+        lng = float(payload.get("addressLng"))
+    except (TypeError, ValueError):
+        return {}
+    if not (math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180):
+        return {}
+    if lat == 0 and lng == 0:  # what a failed lookup tends to send
+        return {}
+    return {"addressLat": f"{lat:.6f}", "addressLng": f"{lng:.6f}"}
+
+
+def has_address_pin(item: dict) -> bool:
+    return bool(item.get("address")) and all(item.get(f) not in (None, "") for f in ADDRESS_COORDINATE_FIELDS)
 
 
 def public_listings(items):

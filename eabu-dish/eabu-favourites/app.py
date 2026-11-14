@@ -15,6 +15,10 @@ passed back as ?cursor= for the next N posts (null once there are no more). The 
 sort key of the last post sent, so posts added meanwhile don't shift or repeat later pages.
 Without ?limit the whole list comes back as before.
 
+Either feed with ?map=1 returns only posts whose poster added an address with a map pin
+(addressLat/addressLng), unpaged (limit/cursor are ignored), up to MAP_MAX_POSTS: the Home
+screen's Map view shows them all at once.
+
 kind is "seller" (a buyer's favourite sellers: their service listings) or "buyer" (a seller's
 favourite buyers: their requests). The list routes also take kind "blocked" (users the caller
 has blocked, up to 500); blocked users' posts never appear in the caller's feeds. Favourites are
@@ -54,13 +58,14 @@ CATEGORIES = ("eat", "live", "move", "lifestyle")
 # seller -> their service listings (provider tables); buyer -> their requests (consumer tables)
 ROLE_TABLE = {"seller": "PROVIDER", "buyer": "CONSUMER"}
 NEARBY_MAX_POSTS = 200  # only when not paging
+MAP_MAX_POSTS = 500  # ?map=1: every pin within the radius, newest first
 MAX_PAGE_SIZE = 50
 # The nearby feed scans whole post tables. A warm container keeps each scan this long, so
 # scrolling through pages (and other users nearby) don't repeat it. A new post can take this
 # long to appear in other people's feeds.
 SCAN_CACHE_SECONDS = 60
 _scan_cache = {}  # table name -> (time scanned, cutoff used, items)
-FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "phone",
+FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "addressLat", "addressLng", "phone",
                "totalstars", "ratingscount", "createdAt", "picture1", "picture2", "picture3", "picture4")
 
 
@@ -188,6 +193,29 @@ def _page(posts, limit, after):
     return page, (_encode_cursor(page[-1]) if len(posts) > limit else None)
 
 
+def _map_only(event):
+    return str((event.get("queryStringParameters") or {}).get("map") or "").lower() in ("1", "true", "yes")
+
+
+def _paging_or_map(event):
+    """(map_only, limit, cursor key). The map is never paged, so its limit/cursor are ignored."""
+    if _map_only(event):
+        return True, None, None
+    return (False, *_paging(event))
+
+
+def _finish(posts, map_only, limit, after, default_cap=None):
+    """Keep only pinned posts for the map, then sort and page/cap. Returns (posts, nextCursor)."""
+    if map_only:
+        posts = [p for p in posts if helpers.has_address_pin(p)]
+    posts, next_cursor = _page(posts, limit, after)
+    if map_only:
+        posts = posts[:MAP_MAX_POSTS]
+    elif limit is None and default_cap:
+        posts = posts[:default_cap]
+    return posts, next_cursor
+
+
 def _attach_pictures(posts):
     for category in CATEGORIES:
         helpers.attach_picture_urls([p for p in posts if p["category"] == category], category)
@@ -201,7 +229,7 @@ def feed(event, user_id, kind):
     denied = _check(event, user_id, kind, kinds=FEED_KINDS)
     if denied:
         return denied
-    limit, after = _paging(event)
+    map_only, limit, after = _paging_or_map(event)
     zip_code = str(((event.get("queryStringParameters") or {}).get("zip") or "")).strip()[:10]
     cutoff = helpers.post_limit_cutoff()
     posts = []
@@ -223,7 +251,7 @@ def feed(event, user_id, kind):
                 kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
     if zip_code:
         posts = helpers.within_miles(zip_code, posts, helpers.NEARBY_MILES)
-    posts, next_cursor = _page(posts, limit, after)
+    posts, next_cursor = _finish(posts, map_only, limit, after)
     if kind == "seller":
         _attach_pictures(posts)  # only for the posts being sent
     result = {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES if zip_code else None}
@@ -265,7 +293,7 @@ def nearby_feed(event, user_id, kind, zip_code):
         return denied
     if not zip_code:
         return helpers._response(400, {"msg": "zip is required"})
-    limit, after = _paging(event)
+    map_only, limit, after = _paging_or_map(event)
     fav_ids = {f["favUserId"] for f in _list(user_id, kind)}
     skip = _blocked_ids(user_id) | {user_id}
     cutoff = helpers.post_limit_cutoff()
@@ -275,9 +303,7 @@ def nearby_feed(event, user_id, kind, zip_code):
                  for i in _recent_posts(_table_for(kind, category), cutoff) if i.get("userId") not in skip]
         found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
         posts += [{**p, "category": category, "isFavourite": p.get("userId") in fav_ids} for p in found]
-    posts, next_cursor = _page(posts, limit, after)
-    if limit is None:
-        posts = posts[:NEARBY_MAX_POSTS]
+    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS)
     if kind == "seller":
         _attach_pictures(posts)  # only for the posts being sent
     result = {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES}

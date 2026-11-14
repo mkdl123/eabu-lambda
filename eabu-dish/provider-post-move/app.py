@@ -66,6 +66,7 @@ def lambda_handler(event, context):
     address = helpers.optional_address(payload)
     if address:
         item["address"] = address
+        item.update(helpers.address_location(payload))  # pin for the Home map
     # item = {
     #     "recipeid": int(new_counter_value),
     #     "zipcode": payload["zipcode"],
