@@ -101,6 +101,14 @@ Functions run on arm64 (Graviton, 20% cheaper) with a 10-second timeout; the two
 
 Every listing, request, offer, ad and profile in the app has a ⋯ button with *Report* and *Block*. `POST /report` (`eabu-report`) saves the report in `eabu-feedback` (`type: report`, `status: open`) and emails it to `ReportEmail` (template parameter, `mdas@eabu.net`; it must stay an @eabu.net address while SES is in the sandbox). A failed email doesn't fail the report. Apple expects reports to be acted on within 24 hours: remove the content and, if needed, the account, with `scripts/moderate.py` (`reports`, `user`, `remove-post`, `ban`/`unban`, `resolve`; changes need `--yes`). Blocks are rows in `eabu-favourites` with kind `blocked` (up to 500, same `/favourites` routes). Both Home feeds leave out blocked users' posts, and the app also hides them from the category lists, offers and profiles. Ads have no public owner, so a reported ad is only hidden on that device for the session. Deleting an account also deletes the reports that user made.
 
+### Sexual content filter
+
+`my_utils/content_filter.py` keeps sexual content out before it's saved (Report/Block is the backstop for anything it misses):
+
+- **Text**: `helpers._validate_payload` rejects any post, offer, ad or repost whose `content_filter.TEXT_FIELDS` contain a blocked word or phrase (400, the message names the field, never the word). Matching is whole-word after undoing look-alikes (`s3x`, `p0rn`), so "Sussex" passes; words real listings use (nude lipstick, naked cake, kinky twist) are deliberately not blocked. The Cognito pre sign-up trigger also refuses User Ids with blocked words.
+- **Pictures**: `eabu-listing-picture` and `eabu-profile-picture` send each picture to Rekognition `DetectModerationLabels` before `put_object`. Nudity or sexual content gets 400 `IMAGE_REJECTED` and isn't stored; swimwear, bare backs and kissing are allowed. If Rekognition fails, the upload is refused with 503 `IMAGE_CHECK_FAILED` (never stored unchecked). About $1 per 1,000 pictures.
+- Tune the word lists and `BLOCKED_PICTURE_LABELS` in that file; tests are in `tests/unit/test_content_filter.py` (Rekognition is faked in `tests/unit/conftest.py`, since moto doesn't support it).
+
 ### Paid ads (Apple in-app subscription)
 
 Advertisers pay $9.99 for 3 months through an auto-renewing App Store subscription (product `net.eabu.app.ad.quarterly`, template parameter `AdProductId`). Rules: one paid ad per owner, live as soon as Apple confirms payment, shown to every user whatever their ZIP. Free ads still need approval and only show within 50 miles. The flow:

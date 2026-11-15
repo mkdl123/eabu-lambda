@@ -11,6 +11,8 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from my_utils import content_filter
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -51,6 +53,15 @@ def _validate_payload(payload: dict, REQUIRED_FIELDS):
     if missing:
         raise ValueError(f"Missing required field(s): {', '.join(missing)}")
     _validate_fields(payload)
+    _validate_content(payload)
+
+
+def _validate_content(payload: dict):
+    """Reject sexual or adult words in any user-visible text (see content_filter)."""
+    field = content_filter.blocked_text_field(payload)
+    if field:
+        # The message names the field, never the matched word, so it's safe to log.
+        raise ValueError(content_filter.blocked_text_message(field))
 
 
 def _validate_fields(payload: dict):

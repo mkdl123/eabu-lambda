@@ -5,11 +5,12 @@ DELETE /profile-picture/{userId}
 
 Each user has at most one profile picture, stored at {userId}/profile.jpg. The bucket is
 not versioned, so an upload overwrites the previous picture and a delete removes it for
-good. No other images are accepted or stored.
+good. No other images are accepted or stored. Each picture is checked with Amazon Rekognition
+first (content_filter); nudity or sexual content gets a 400 IMAGE_REJECTED and is never stored.
 """
 import json
 import os
-from my_utils import helpers
+from my_utils import content_filter, helpers
 
 import boto3
 import logging
@@ -132,6 +133,16 @@ def upload_picture(event):
         image_data = optimize_image(validate_image_base64(base64_data, 'picture'), max_size=(1024, 1024))
     except ValueError:
         return helpers._response(400, {"msg": "Error processing picture"})
+
+    try:
+        reason = content_filter.picture_block_reason(image_data)
+    except content_filter.ModerationUnavailable:
+        return helpers._response(503, {"msg": content_filter.PICTURE_CHECK_FAILED_MESSAGE,
+                                       "code": "IMAGE_CHECK_FAILED"})
+    if reason:
+        logger.warning("Rejected profile picture for user %s: %s", user_id, reason)
+        return helpers._response(400, {"msg": content_filter.PICTURE_REJECTED_MESSAGE,
+                                       "code": "IMAGE_REJECTED"})
 
     try:
         s3_client.put_object(Bucket=BUCKET_NAME, Key=picture_key(user_id), Body=image_data,

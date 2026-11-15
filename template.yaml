@@ -1025,11 +1025,15 @@ Resources:
                 - s3:DeleteObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
+            - Effect: Allow
+              Action:
+                - rekognition:DetectModerationLabels  # nudity check before saving (content_filter)
+              Resource: '*'  # this action has no resource-level permissions
 
   EabuListingPictureFunction:
     Type: AWS::Serverless::Function
     Properties:
-      # Up to two pictures per seller listing: POST /listing-picture uploads or replaces
+      # Up to four pictures per seller listing: POST /listing-picture uploads or replaces
       # a slot, DELETE /listing-picture/{category}/{zipcode}/{itemId}/{slot} removes it.
       CodeUri: eabu-dish/eabu-listing-picture
       Handler: app.lambda_handler
@@ -1043,6 +1047,10 @@ Resources:
                 - s3:DeleteObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
+            - Effect: Allow
+              Action:
+                - rekognition:DetectModerationLabels  # nudity check before saving (content_filter)
+              Resource: '*'  # this action has no resource-level permissions
             - Effect: Allow
               Action:
                 - dynamodb:GetItem

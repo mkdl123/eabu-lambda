@@ -5,7 +5,9 @@ POST   /listing-picture
              "picture": <base64 image>}
 DELETE /listing-picture/{category}/{zipcode}/{itemId}/{slot}
 
-Only the seller who owns the listing may change its pictures. Pictures are stored at
+Only the seller who owns the listing may change its pictures. Each picture is checked with
+Amazon Rekognition first (content_filter); nudity or sexual content gets a 400 IMAGE_REJECTED
+and is never stored. Pictures are stored at
 listings/{category}/{itemId}/{slot}.jpg in the private picture bucket (unversioned, so an
 upload overwrites that slot and a delete removes it for good), and the listing row records
 picture{slot} = upload time so the read functions know which links to sign. The listing
@@ -23,7 +25,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image, ImageOps
 
-from my_utils import helpers
+from my_utils import content_filter, helpers
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -66,6 +68,20 @@ def process_image(base64_data: str) -> bytes:
     except Exception as e:  # never store bytes that failed validation
         logger.warning("Rejected listing picture: %s", type(e).__name__)
         raise ValueError("Invalid picture")
+
+
+def check_picture(image: bytes, item_id):
+    """Return an error response if the picture has nudity or sexual content (or can't be checked)."""
+    try:
+        reason = content_filter.picture_block_reason(image)
+    except content_filter.ModerationUnavailable:
+        return helpers._response(503, {"msg": content_filter.PICTURE_CHECK_FAILED_MESSAGE,
+                                       "code": "IMAGE_CHECK_FAILED"})
+    if reason:
+        logger.warning("Rejected listing picture for item %s: %s", item_id, reason)
+        return helpers._response(400, {"msg": content_filter.PICTURE_REJECTED_MESSAGE,
+                                       "code": "IMAGE_REJECTED"})
+    return None
 
 
 def _listing_target(event, category, zipcode, item_id, slot):
@@ -125,6 +141,9 @@ def upload_picture(event):
         image = process_image(picture)
     except ValueError:
         return helpers._response(400, {"msg": "Error processing picture"})
+    rejected = check_picture(image, item_id)
+    if rejected:
+        return rejected
 
     uploaded_at = datetime.now(timezone.utc).isoformat()
     try:

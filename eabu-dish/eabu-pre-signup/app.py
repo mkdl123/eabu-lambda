@@ -1,4 +1,6 @@
-"""Cognito pre sign-up trigger: refuse sign-ups with an email whose account was deleted recently.
+"""Cognito pre sign-up trigger: refuse sexual User Ids, and emails whose account was deleted recently.
+
+User Ids are shown on posts, so one with a blocked word (content_filter) is refused.
 
 eabu-delete-user-info stores a hash of the deleted account's email in eabu-blocked-emails with
 expiresAt = deletion + helpers.EMAIL_BLOCK_DAYS. While that's in the future, a self-service
@@ -18,7 +20,7 @@ from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from my_utils import helpers
+from my_utils import content_filter, helpers
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -31,9 +33,16 @@ class EmailBlocked(Exception):
     pass
 
 
+class UserIdBlocked(Exception):
+    pass
+
+
 def lambda_handler(event, context):
     if event.get("triggerSource") != "PreSignUp_SignUp":
         return event
+    if content_filter.text_is_blocked(event.get("userName")):
+        logger.info("Sign-up refused: User Id contains a blocked word")
+        raise UserIdBlocked("This User Id isn't allowed. Please choose a different one.")
     email = (event.get("request", {}).get("userAttributes") or {}).get("email")
     if not email:
         return event
