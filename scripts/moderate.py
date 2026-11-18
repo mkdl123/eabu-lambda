@@ -13,6 +13,9 @@ changes something only shows what it would do until you add --yes.
                                                         # delete its posts and offers, take its ads down
     python3 scripts/moderate.py unban <userId> --yes    # let the account sign in again (posts stay deleted)
     python3 scripts/moderate.py resolve <reportID> [--note "removed post"] --yes
+    python3 scripts/moderate.py unblock-email <email> --yes
+                                                        # lift the 30-day sign-up block left by a
+                                                        # deleted account, so the email can sign up now
 
 category is eat, live, move or lifestyle. A listing is a seller's post, a request a buyer's.
 The report email shows the category, ZIP and ID. To delete an account and all its data
@@ -21,7 +24,9 @@ for good, use scripts/delete_user.py instead.
 Runs with your local AWS credentials (needs a Python with boto3).
 """
 import argparse
+import hashlib
 import sys
+from datetime import datetime, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -30,6 +35,7 @@ REGION = "us-east-1"
 POOL_ID = "us-east-1_G0VobzUMd"
 PICTURE_BUCKET = "eabu-identity-pictures"
 FEEDBACK_TABLE = "eabu-feedback"
+BLOCKED_EMAILS_TABLE = "eabu-blocked-emails"
 AD_TABLE = "eabu-advertisement"
 CATEGORIES = ("eat", "live", "move", "lifestyle")
 ROLES = {"listing": "provider", "request": "consumer"}
@@ -178,6 +184,11 @@ def _print_report(r):
         print(f"    resolution: {r['resolution']}")
 
 
+def email_hash(email):
+    """Same as helpers.email_hash: the block table only stores this hash, never the email."""
+    return hashlib.sha256(str(email).strip().lower().encode("utf-8")).hexdigest()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -199,6 +210,9 @@ def main(argv=None):
     rs.add_argument("report_id")
     rs.add_argument("--note", default="")
     rs.add_argument("--yes", action="store_true")
+    ue = sub.add_parser("unblock-email")
+    ue.add_argument("email")
+    ue.add_argument("--yes", action="store_true")
     args = p.parse_args(argv)
 
     if args.cmd == "reports":
@@ -280,6 +294,21 @@ def main(argv=None):
             print(f"No report #{args.report_id}.")
             return 1
         print(f"Report #{args.report_id} marked resolved.")
+        return 0
+    if args.cmd == "unblock-email":
+        table = ddb.Table(BLOCKED_EMAILS_TABLE)
+        key = {"emailHash": email_hash(args.email)}
+        row = table.get_item(Key=key).get("Item")
+        if not row:
+            print("That email isn't blocked; it can sign up already.")
+            return 0
+        until = datetime.fromtimestamp(int(row.get("expiresAt", 0)), timezone.utc).strftime("%Y-%m-%d")
+        print(f"Blocked from signing up until {until} (a deleted account used it).")
+        if not args.yes:
+            print("Nothing changed. Add --yes to let it sign up now.")
+            return 0
+        table.delete_item(Key=key)
+        print("Unblocked: this email can create a new account now.")
         return 0
     return 1
 
