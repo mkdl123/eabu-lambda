@@ -115,7 +115,7 @@ Parameters:
     Description: Each seller's extra-post balance and the Apple transactions already credited (created by scripts/create-post-credits-table.sh).
   AppAppleId:
     Type: String
-    Default: "6833603481"
+    Default: "6826959691"
     Description: The app's numeric Apple ID (App Store Connect > App Information). Needed to verify App Store (production) purchases.
   IapAllowSandbox:
     Type: String
