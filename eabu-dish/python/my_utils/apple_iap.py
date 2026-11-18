@@ -22,6 +22,13 @@ _TOKEN_NAMESPACE = uuid.UUID("6f1c9a52-4d8e-4b7a-9f3e-2c5d8a1b7e40")
 PAID_STATUS = "active"        # the status the public ad list shows
 AWAITING_STATUS = "awaiting_payment"
 EXPIRED_STATUS = "expired"
+FREE_AD_DAYS = 90             # an owner's first ad runs free for 3 months, like one paid period
+
+
+def first_ad_free(owner_ads):
+    """True if none of the owner's ads (paid=True rows) has ever gone live, free or bought."""
+    return not any(a.get("freeAd") or a.get("activatedAt") or a.get("originalTransactionId")
+                   for a in owner_ads)
 
 
 class PurchaseError(ValueError):

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from my_utils import helpers
 from my_utils.apple_iap import account_token as _account_token, AWAITING_STATUS as AWAITING_PAYMENT, PAID_STATUS as AD_LIVE
+from my_utils.apple_iap import first_ad_free, FREE_AD_DAYS
 import boto3
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import BotoCoreError, ClientError
@@ -89,6 +90,7 @@ def lambda_handler(event, context):
 
     caller = helpers.get_caller_id(event)
     paid = payload.get("paid") is True
+    free_first = False
     if paid:
         # A paid ad is tied to its owner, so the purchase can be matched to it.
         if caller is None:
@@ -101,6 +103,8 @@ def lambda_handler(event, context):
         now = int(datetime.now(timezone.utc).timestamp())
         if any(a.get("status") == AD_LIVE and int(a.get("paidThrough") or 0) > now for a in mine):
             return helpers._response(409, {"msg": "You already have an ad running"})
+        # The owner's first ad is free: live nationwide at once for FREE_AD_DAYS, no purchase.
+        free_first = first_ad_free(mine)
 
     sort_key_initial_value = 100  # Replace 'your_partition_key'
     new_counter_value = helpers.increment_counter_with(sort_key_initial_value, table, partitionkey='zipcode')
@@ -124,6 +128,11 @@ def lambda_handler(event, context):
     if paid:
         # Shown everywhere once Apple confirms payment (eabu-ad-purchase); until then hidden.
         item.update(status=AWAITING_PAYMENT, paid=True, scope="national")
+        if free_first:
+            now = int(datetime.now(timezone.utc).timestamp())
+            item.update(status=AD_LIVE, freeAd=True, autoRenew=False,
+                        paidThrough=now + FREE_AD_DAYS * 86400,
+                        activatedAt=datetime.now(timezone.utc).isoformat())
 
     try:
         table.put_item(Item=item)
@@ -137,6 +146,12 @@ def lambda_handler(event, context):
         return helpers._response(500,
                                  {"msg": "Failed to create record"})
 
+    if free_first:
+        logger.info("Free first ad %s live until %s", item["ID"], item["paidThrough"])
+        return helpers._response(200, {
+            "message": "Your first ad is free and live now", "ID": item["ID"],
+            "zipcode": item["zipcode"], "status": AD_LIVE, "free": True,
+            "paidThrough": item["paidThrough"]})
     if paid:
         return helpers._response(200, {
             "message": "Ad saved; complete the purchase to publish it", "ID": item["ID"],

@@ -62,7 +62,16 @@ def stub_transactions(monkeypatch, decoded):
     monkeypatch.setattr(apple_iap, "verify_transaction", verify)
 
 
-def create_paid_ad(user, **extra):
+def used_free_ad(user):
+    """Give the user an ended free first ad, so their next ad is a paid one."""
+    boto3.resource("dynamodb", region_name="us-east-1").Table("eabu-advertisement").put_item(Item={
+        "zipcode": "00000", "ID": 1, "ownerUserId": user, "paid": True, "freeAd": True,
+        "status": "expired", "paidThrough": NOW - 10 * DAY, "title": "Old free ad"})
+
+
+def create_paid_ad(user, first=False, **extra):
+    if not first:
+        used_free_ad(user)
     res = load("eabu-advertisement-post").lambda_handler(as_user(post({**AD, "paid": True, **extra}), user), None)
     return res
 
@@ -101,6 +110,35 @@ def test_paid_ad_goes_live_nationwide_after_verified_purchase(monkeypatch):
     far = public_ads("94103")
     assert far["Count"] == 1 and far["Items"][0]["nationwide"] is True
     assert not {"email", "phone", "name", "address", "ownerUserId", "originalTransactionId"} & set(far["Items"][0])
+
+
+@mock_aws
+def test_first_ad_is_free_and_live_nationwide(monkeypatch):
+    table = make_ad_table()
+    mine = lambda: body(load("eabu-ad-purchase").lambda_handler(
+        as_user({"httpMethod": "GET", "pathParameters": {"userId": "eve"}}, "eve"), None))
+    assert mine()["firstAdFree"] is True
+
+    res = create_paid_ad("eve", first=True)
+    assert res["statusCode"] == 200
+    ad = body(res)
+    assert ad["free"] is True and ad["status"] == "active" and "productId" not in ad
+    stored = table.get_item(Key={"zipcode": "19060", "ID": ad["ID"]})["Item"]
+    assert stored["freeAd"] is True and stored["autoRenew"] is False
+    assert abs(int(stored["paidThrough"]) - (NOW + 90 * DAY)) < 60
+    assert public_ads("94103")["Count"] == 1, "shown everywhere, no approval or payment"
+    assert mine()["firstAdFree"] is False and mine()["ad"]["freeAd"] is True
+
+    assert create_paid_ad("eve", first=True)["statusCode"] == 409, "still running"
+    # Once it ends, the next ad is a paid one.
+    table.update_item(Key={"zipcode": "19060", "ID": ad["ID"]}, UpdateExpression="SET paidThrough = :p",
+                      ExpressionAttributeValues={":p": NOW - DAY})
+    assert body(create_paid_ad("eve", first=True))["status"] == "awaiting_payment"
+    assert table.get_item(Key={"zipcode": "19060", "ID": ad["ID"]})["Item"]["freeAd"] is True, "kept as the record"
+
+    # The daily job sends no renewal email for it and hides it after it ends.
+    assert load("eabu-ad-reminder").lambda_handler({}, None, now=NOW)["reminded"] == 0
+    assert load("eabu-ad-reminder").lambda_handler({}, None, now=NOW + 2 * DAY)["hidden"] == 1
 
 
 @mock_aws

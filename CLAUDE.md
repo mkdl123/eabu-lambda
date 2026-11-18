@@ -111,7 +111,7 @@ Every listing, request, offer, ad and profile in the app has a ⋯ button with *
 
 ### Paid ads (Apple in-app subscription)
 
-Advertisers pay $9.99 for 3 months through an auto-renewing App Store subscription (product `net.eabu.app.ad.quarterly`, template parameter `AdProductId`). Rules: one paid ad per owner, live as soon as Apple confirms payment, shown to every user whatever their ZIP. Free ads still need approval and only show within 50 miles. The flow:
+Advertisers pay $9.99 for 3 months through an auto-renewing App Store subscription (product `net.eabu.app.ad.quarterly`, template parameter `AdProductId`). Rules: one paid ad per owner, live as soon as Apple confirms payment, shown to every user whatever their ZIP. Free ads still need approval and only show within 50 miles. Each owner's **first** ad is free: `POST /eabu-advertisement` with `"paid": true` saves it `active` with `freeAd: true`, `autoRenew: false` and `paidThrough` 90 days out (`apple_iap.FREE_AD_DAYS`), skipping the purchase (the response has `free: true`). `apple_iap.first_ad_free` decides: no earlier ad of the owner went live (`freeAd`, `activatedAt` or `originalTransactionId`). `GET /eabu-ad-purchase/{userId}` returns `firstAdFree` so the app can say so. Deleting the account deletes its ads, so a re-created account with the same User Id gets another free ad. The flow:
 
 1. `POST /eabu-advertisement` with `"paid": true` saves the ad as `awaiting_payment`, with `ownerUserId`, `paid` and `scope: national`. It returns `ID`, `zipcode`, `productId` and `appAccountToken`.
 2. The app buys the subscription with StoreKit, passing `appAccountToken`, a UUID derived from the user by `apple_iap.account_token`.
