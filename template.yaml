@@ -574,20 +574,6 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
 
-  EabuIdentityCheckFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-    Properties:
-      CodeUri: eabu-dish/eabu-identity-check
-      Handler: app.lambda_handler
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EabuIdentityTableName}'
-
   ProviderGetMoveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:

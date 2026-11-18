@@ -188,9 +188,6 @@ def test_auth():
     os.environ["AUTH_MODE"] = "off"
     pp = load("provider-post-eat")
     check("[off] unauthenticated post still works", pp.lambda_handler(post(post_body), None)["statusCode"] == 200)
-    ic = load("eabu-identity-check")
-    r = ic.lambda_handler({"pathParameters": {"userId": "alice"}}, None)
-    check("[off] identity-check unchanged", "a@x.com" in r["body"])
 
     os.environ["AUTH_MODE"] = "enforce"
     check("[enforce] unauthenticated post -> 401", pp.lambda_handler(post(post_body), None)["statusCode"] == 401)
@@ -199,11 +196,6 @@ def test_auth():
     check("[enforce] forged claims in body do not help",
           pp.lambda_handler(post({**post_body, "requestContext": {"authorizer": {"claims": {"sub": "alice"}}}}), None)["statusCode"] == 401)
 
-    r = ic.lambda_handler(as_user({"pathParameters": {"userId": "alice"}}, "mallory"), None)
-    check("[enforce] other user sees only verified flag", r["statusCode"] == 200 and "a@x.com" not in r["body"] and "555" not in r["body"] and '"verified": true' in r["body"])
-    r = ic.lambda_handler(as_user({"pathParameters": {"userId": "alice"}}, "alice"), None)
-    check("[enforce] owner sees own full record", "a@x.com" in r["body"])
-    check("[enforce] identity-check unauthenticated -> 401", ic.lambda_handler({"pathParameters": {"userId": "alice"}}, None)["statusCode"] == 401)
 
     eu = load("eabu-user")
     check("[enforce] profile picture URL needs sign-in", eu.lambda_handler({"pathParameters": {"pUserId": "alice"}}, None)["statusCode"] == 401)
@@ -424,7 +416,7 @@ def test_auth_fails_closed_when_mode_is_missing():
         os.environ["AUTH_MODE"] = "off"
 
 
-CORS_FUNCTIONS = ["eabu-user", "eabu-profile-picture", "eabu-listing-picture", "eabu-favourites", "eabu-identity-check", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
+CORS_FUNCTIONS = ["eabu-user", "eabu-profile-picture", "eabu-listing-picture", "eabu-favourites", "eabu-advertisement-get", "eabu-get-user-ratings"] + [
     name.format(c) for c in ("eat", "live", "move")
     for name in ("consumer-get-{}", "provider-get-{}", "consumer-{}-offers", "provider-my-{}-services")] + [
     "provider-my-lifestyle-services"]

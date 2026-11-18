@@ -4,7 +4,8 @@
 # (except PUBLIC_ROUTES), a Lambda proxy integration and
 # a mock OPTIONS for CORS, like the existing routes. --apply also removes the methods in
 # RETIRED_ROUTES (the old identity/selfie upload, the
-# old follow feature, replaced by favourites, and two lookups no app version called).
+# old follow feature, replaced by favourites, two lookups no app version called and
+# the identity check, unused since the licence upload went in 2026-11-07).
 #
 #   ./scripts/create-api-routes.sh            # report only, changes nothing
 #   ./scripts/create-api-routes.sh --apply    # create missing routes (not live yet)
@@ -23,6 +24,8 @@ AUTHORIZER_NAME="${AUTHORIZER_NAME:-EabuCognitoAuthorizer}"
 MODE="${1:-report}"
 case "$MODE" in report|--apply|--deploy) ;; *) echo "usage: $0 [--apply|--deploy]" >&2; exit 2 ;; esac
 
+# API Gateway throttles get-resources hard; retry with backoff instead of failing.
+export AWS_RETRY_MODE=adaptive AWS_MAX_ATTEMPTS=10
 api() { aws apigateway --region "$REGION" "$@"; }
 
 if [[ "$MODE" == "--deploy" ]]; then
@@ -80,12 +83,14 @@ RETIRED_ROUTES=(
   "GET /eabu-i-follow/{cUserId}"
   "POST /eabu-user-zip"
   "GET /eabu-get-user/{param}"
+  "GET /eabu-identity-check/{userId}"
 )
 
 resource_id() { # path -> id, or empty when the resource does not exist
   local id
   id=$(api get-resources --rest-api-id "$API_ID" --limit 500 \
-    --query "items[?path=='$1'].id | [0]" --output text)
+    --query "items[?path=='$1'].id | [0]" --output text) \
+    || { echo "Could not look up $1 (throttled?); stopping here. It is safe to re-run." >&2; kill $$; exit 1; }
   [[ "$id" == "None" ]] || echo "$id"
 }
 
