@@ -128,6 +128,14 @@ def get_caller_id(event):
     return str(value) if value else None
 
 
+def get_caller_email(event):
+    """The signed-in caller's account email from the verified Cognito ID token, or None."""
+    authorizer = ((event or {}).get("requestContext") or {}).get("authorizer") or {}
+    claims = authorizer.get("claims") or (authorizer.get("jwt") or {}).get("claims") or {}
+    value = claims.get("email")
+    return str(value) if value else None
+
+
 def require_authenticated(event):
     """Return None if the caller is signed in (or auth is not enforced), else a 401 response."""
     if get_caller_id(event) is not None:

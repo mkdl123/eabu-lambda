@@ -134,6 +134,29 @@ def test_delete_account_removes_only_the_callers_data(monkeypatch):
 
 
 @mock_aws
+def test_deleting_an_account_that_had_an_ad_keeps_a_free_ad_marker(monkeypatch):
+    from my_utils import apple_iap
+    t, s3, cognito, pool = setup(monkeypatch)
+    t["ads"].put_item(Item={"zipcode": "19060", "ID": 30, "ownerUserId": "alice", "paid": True, "freeAd": True})
+    t["ads"].put_item(Item={"zipcode": "19060", "ID": 31, "ownerUserId": "bob", "paid": True, "freeAd": True})
+    load("eabu-delete-user-info").lambda_handler(as_user(post({"userId": "alice"}), "alice"), None)
+
+    assert owners(t["ads"], "ownerUserId") == ["bob", "bob"], "alice's ads are gone"
+    markers = [i for i in t["ads"].scan()["Items"] if str(i["zipcode"]).startswith("freead#")]
+    assert len(markers) == 2 and not any("alice" in str(m).lower() for m in markers), "hashes only"
+    assert apple_iap.free_ad_used_before(t["ads"], "Alice")
+    assert apple_iap.free_ad_used_before(t["ads"], "new-alice", " ALICE@example.com")
+    assert not apple_iap.free_ad_used_before(t["ads"], "bob", "bob@example.com")
+
+    # Bob never had a live ad: deleting him leaves no marker.
+    t["ads"].delete_item(Key={"zipcode": "19060", "ID": 31})
+    t["ads"].update_item(Key={"zipcode": "19060", "ID": 20}, UpdateExpression="SET paid = :t",
+                         ExpressionAttributeValues={":t": True})
+    load("eabu-delete-user-info").lambda_handler(as_user(post({"userId": "bob"}), "bob"), None)
+    assert not apple_iap.free_ad_used_before(t["ads"], "bob", "bob@example.com")
+
+
+@mock_aws
 def test_cannot_delete_someone_else(monkeypatch):
     t, s3, cognito, pool = setup(monkeypatch)
     fn = load("eabu-delete-user-info")

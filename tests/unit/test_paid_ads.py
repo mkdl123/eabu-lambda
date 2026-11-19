@@ -142,6 +142,28 @@ def test_first_ad_is_free_and_live_nationwide(monkeypatch):
 
 
 @mock_aws
+def test_recreated_account_gets_no_second_free_ad(monkeypatch):
+    table = make_ad_table()
+    # A deleted account "eve" (eve@example.com) had an ad; only its markers are left.
+    apple_iap.mark_free_ad_used(table, "eve", "eve@example.com")
+    with_email = lambda user, email: {**as_user(post({**AD, "paid": True}), user),
+                                      "requestContext": {"authorizer": {"claims": {"sub": user, "email": email}}}}
+    fn = load("eabu-advertisement-post")
+
+    same_id = body(fn.lambda_handler(with_email("eve", "new@example.com"), None))
+    assert same_id["status"] == "awaiting_payment", "same User Id, new email"
+    same_email = body(fn.lambda_handler(with_email("eve2", "EVE@example.com"), None))
+    assert same_email["status"] == "awaiting_payment", "new User Id, same email"
+    mine = load("eabu-ad-purchase").lambda_handler(
+        {**with_email("eve2", "eve@example.com"), "httpMethod": "GET", "pathParameters": {"userId": "eve2"}}, None)
+    assert body(mine)["firstAdFree"] is False
+
+    fresh = body(fn.lambda_handler(with_email("zoe", "zoe@example.com"), None))
+    assert fresh["free"] is True
+    assert apple_iap.free_ad_used_before(table, "zoe", "zoe@example.com"), "marked when granted"
+
+
+@mock_aws
 def test_free_ads_stay_local_beside_paid(monkeypatch):
     table = make_ad_table()
     table.put_item(Item={"zipcode": "19060", "ID": 5, "status": "active", "title": "Local shop"})

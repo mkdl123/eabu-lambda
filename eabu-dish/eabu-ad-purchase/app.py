@@ -67,7 +67,8 @@ def _my_ad(event):
     live = [a for a in ads if a.get("status") == apple_iap.PAID_STATUS]
     ad = (live or ads or [None])[0]
     return _ok({"ad": {k: ad[k] for k in MY_AD_FIELDS if k in ad} if ad else None,
-                "firstAdFree": apple_iap.first_ad_free(ads),
+                "firstAdFree": apple_iap.first_ad_free(ads) and not apple_iap.free_ad_used_before(
+                    table, user_id, helpers.get_caller_email(event)),
                 "productId": apple_iap.product_id(),
                 "appAccountToken": apple_iap.account_token(user_id)})
 

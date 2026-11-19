@@ -31,6 +31,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
 from my_utils import helpers
+from my_utils import apple_iap
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -163,6 +164,11 @@ def delete_user(user_id: str) -> dict:
     counts["favourites"] = _delete_rows(favourites, mine + theirs, ("userId", "favKey"))
 
     owned_ads = _scan_all(ads, FilterExpression=Attr("ownerUserId").eq(user_id))
+    if not apple_iap.first_ad_free([a for a in owned_ads if a.get("paid") is True]):
+        # They had a live ad: remember it (hashes only), so a re-created account
+        # with this User Id or email doesn't get another free first ad.
+        with ads.batch_writer() as batch:
+            apple_iap.mark_free_ad_used(batch, user_id, email)
     counts["ads"] = _delete_rows(ads, owned_ads, ("zipcode", "ID"))
 
     # Post credits: delete the balance; keep purchase records (replay protection) but unlink them.

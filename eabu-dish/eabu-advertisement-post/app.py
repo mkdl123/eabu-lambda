@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from my_utils import helpers
 from my_utils.apple_iap import account_token as _account_token, AWAITING_STATUS as AWAITING_PAYMENT, PAID_STATUS as AD_LIVE
-from my_utils.apple_iap import first_ad_free, FREE_AD_DAYS
+from my_utils.apple_iap import first_ad_free, free_ad_used_before, mark_free_ad_used, FREE_AD_DAYS
 import boto3
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import BotoCoreError, ClientError
@@ -95,16 +95,18 @@ def lambda_handler(event, context):
         # A paid ad is tied to its owner, so the purchase can be matched to it.
         if caller is None:
             return helpers._response(401, {"msg": "Unauthorized"})
+        email = helpers.get_caller_email(event)
         try:
             mine = _paid_ads_of(caller)
+            # Free only if this account never had a live ad, nor did a deleted one with
+            # the same User Id or email.
+            free_first = first_ad_free(mine) and not free_ad_used_before(table, caller, email)
         except (BotoCoreError, ClientError):
             logger.exception("Failed to look up the caller's paid ads")
             return helpers._response(500, {"msg": "Failed to create record"})
         now = int(datetime.now(timezone.utc).timestamp())
         if any(a.get("status") == AD_LIVE and int(a.get("paidThrough") or 0) > now for a in mine):
             return helpers._response(409, {"msg": "You already have an ad running"})
-        # The owner's first ad is free: live nationwide at once for FREE_AD_DAYS, no purchase.
-        free_first = first_ad_free(mine)
 
     sort_key_initial_value = 100  # Replace 'your_partition_key'
     new_counter_value = helpers.increment_counter_with(sort_key_initial_value, table, partitionkey='zipcode')
@@ -129,12 +131,15 @@ def lambda_handler(event, context):
         # Shown everywhere once Apple confirms payment (eabu-ad-purchase); until then hidden.
         item.update(status=AWAITING_PAYMENT, paid=True, scope="national")
         if free_first:
+            # The owner's first ad is free: live nationwide at once for FREE_AD_DAYS, no purchase.
             now = int(datetime.now(timezone.utc).timestamp())
             item.update(status=AD_LIVE, freeAd=True, autoRenew=False,
                         paidThrough=now + FREE_AD_DAYS * 86400,
                         activatedAt=datetime.now(timezone.utc).isoformat())
 
     try:
+        if free_first:
+            mark_free_ad_used(table, caller, email)
         table.put_item(Item=item)
         if paid:
             # Earlier ads this owner never paid for are dropped, so there's one ad per owner.

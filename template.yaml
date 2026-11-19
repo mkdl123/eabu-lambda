@@ -1125,6 +1125,7 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Scan          # the owner's paid ads (one paid ad per owner)
+                - dynamodb:GetItem       # free-ad markers left by deleted accounts
                 - dynamodb:DeleteItem    # their unpaid drafts
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
@@ -1146,6 +1147,7 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:Scan
+                - dynamodb:GetItem       # free-ad markers (firstAdFree)
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'

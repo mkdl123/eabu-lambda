@@ -10,6 +10,7 @@ or notification is verified against Apple's root certificates (bundled next to t
 file) before anything is trusted, and the token ties a purchase to the Eabu user who
 made it.
 """
+import hashlib
 import os
 import uuid
 from datetime import datetime, timezone
@@ -29,6 +30,32 @@ def first_ad_free(owner_ads):
     """True if none of the owner's ads (paid=True rows) has ever gone live, free or bought."""
     return not any(a.get("freeAd") or a.get("activatedAt") or a.get("originalTransactionId")
                    for a in owner_ads)
+
+
+def free_ad_marker_keys(user_id, email=None):
+    """Ad-table keys of the rows that say "this User Id / account email already had an ad".
+
+    They hold only hashes and no ownerUserId, so deleting the account keeps them: a
+    re-created account with the same User Id or email doesn't get a second free ad.
+    """
+    def h(value):
+        return hashlib.sha256(str(value).strip().lower().encode("utf-8")).hexdigest()
+    keys = [{"zipcode": f"freead#u#{h(user_id)}", "ID": 0}]
+    if email:
+        keys.append({"zipcode": f"freead#e#{h(email)}", "ID": 0})
+    return keys
+
+
+def free_ad_used_before(table, user_id, email=None):
+    """True if a marker exists for this User Id or email (an earlier, deleted account)."""
+    return any("Item" in table.get_item(Key=k) for k in free_ad_marker_keys(user_id, email))
+
+
+def mark_free_ad_used(writer, user_id, email=None):
+    """Write the markers; writer is the ad table or a batch_writer on it."""
+    now = datetime.now(timezone.utc).isoformat()
+    for k in free_ad_marker_keys(user_id, email):
+        writer.put_item(Item={**k, "freeAdUsed": True, "markedAt": now})
 
 
 class PurchaseError(ValueError):
