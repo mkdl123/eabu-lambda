@@ -61,12 +61,16 @@ ROUTES=(
   "GET /post-credits/{userId} EabuPostCreditsFunction"
   "POST /report EabuReportFunction"
   "POST /apple-iap-notifications EabuAppleNotificationsFunction"
+  "POST /share-link EabuPublicPostFunction"
+  "GET /public-post/{token} EabuPublicPostFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.
-# The function itself verifies every request (Apple's signature on each notification).
+# The function itself verifies every request (Apple's signature on each notification, the
+# HMAC on each post-page token).
 PUBLIC_ROUTES=(
   "POST /apple-iap-notifications"
+  "GET /public-post/{token}"     # the website's post preview; the token is HMAC-signed
 )
 
 is_public() { # method path -> success when the route takes no Cognito sign-in
