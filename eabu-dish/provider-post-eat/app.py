@@ -86,4 +86,9 @@ def lambda_handler(event, context):
             helpers.refund_post_credit(payload["userId"])
         return helpers._response(500, {"msg": "Failed to create dish"})
 
-    return helpers._response(200, {"message": "Recipe posted ", "ID": item["ID"]})
+    body = {"message": "Recipe posted ", "ID": item["ID"]}
+    # Their first post after being invited by a friend: both get extra posts.
+    reward = helpers.reward_referral(item["userId"])
+    if reward:
+        body["referralPosts"] = reward
+    return helpers._response(200, body)

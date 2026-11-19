@@ -1,7 +1,8 @@
 """GET /eabu-user/{pUserId}: a short-lived link to the user's optional profile picture.
 
 Returns {"url": "<presigned link>"} when the user has a profile picture and {"url": null}
-when they have none (it is optional, and they may have deleted it).
+when they have none (it is optional, and they may have deleted it). Also
+"communityBuilder": true once they have helpers.COMMUNITY_BUILDER_INVITES successful invites.
 """
 import logging
 import os
@@ -37,15 +38,16 @@ def lambda_handler(event, context):
         return helpers._response(400, {"msg": "pUserId is required"})
     key = f"{userid}/profile.jpg"
 
+    badge = {"communityBuilder": helpers.is_community_builder(userid)}
     try:
         if not _picture_exists(key):
-            return helpers._response(200, {"url": None})
+            return helpers._response(200, {"url": None, **badge})
         url = s3.generate_presigned_url(
             ClientMethod="get_object",
             Params={"Bucket": BUCKET, "Key": key},
             ExpiresIn=300,  # URL valid for 5 minutes
         )
-        return helpers._response(200, {"url": url})
+        return helpers._response(200, {"url": url, **badge})
     except (BotoCoreError, ClientError):
         logger.exception("Failed to look up profile picture")
         return helpers._response(500, {"msg": "Failed to generate presigned URL"})

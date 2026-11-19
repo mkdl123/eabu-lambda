@@ -151,9 +151,9 @@ def test_profile_picture_link_only_when_present():
     s3 = boto3.client("s3", region_name="us-east-1"); s3.create_bucket(Bucket="eabu-identity-pictures")
     eu = load("eabu-user")
     get = lambda uid: json.loads(eu.lambda_handler({"pathParameters": {"pUserId": uid}}, None)["body"])
-    check("no picture -> url is null", get("nobody") == {"url": None})
+    check("no picture -> url is null", get("nobody") == {"url": None, "communityBuilder": False})
     s3.put_object(Bucket="eabu-identity-pictures", Key="carol/selfie.jpg", Body=b"x")
-    check("an old selfie is never served", get("carol") == {"url": None})
+    check("an old selfie is never served", get("carol") == {"url": None, "communityBuilder": False})
     s3.put_object(Bucket="eabu-identity-pictures", Key="alice/profile.jpg", Body=b"x")
     url = get("alice")["url"]
     check("picture -> presigned link to it", url and "alice/profile.jpg" in url)

@@ -173,6 +173,8 @@ def delete_user(user_id: str) -> dict:
 
     # Post credits: delete the balance; keep purchase records (replay protection) but unlink them.
     credits.delete_item(Key={"userId": user_id})
+    # Who invited them. The refemail# marker stays (a hash only), so the email can't earn twice.
+    credits.delete_item(Key={"userId": helpers.referral_key(user_id)})
     for tx in _scan_all(credits, FilterExpression=Attr("ownerUserId").eq(user_id)):
         credits.update_item(Key={"userId": tx["userId"]}, UpdateExpression="REMOVE ownerUserId")
 

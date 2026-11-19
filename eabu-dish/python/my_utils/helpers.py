@@ -410,6 +410,120 @@ def refund_post_credit(user_id: str) -> None:
         logger.exception("Could not refund an extra post")
 
 
+# Invite friends: a new user may name who invited them at sign-up (eabu-pre-signup saves
+# {userId: "ref#<new user, lower case>", invitedBy, emailHash} in the credits table). When
+# the new user's first post or request is saved, both get REFERRAL_POSTS extra posts. The
+# inviter is rewarded at most REFERRAL_MONTHLY_CAP times a calendar month (UTC), and each
+# email earns the reward once ever ({userId: "refemail#<hash>"}, kept after deletion).
+# COMMUNITY_BUILDER_INVITES successful invites earn the Community Builder badge.
+REFERRAL_POSTS = 5
+REFERRAL_MONTHLY_CAP = 10
+COMMUNITY_BUILDER_INVITES = 3
+
+
+def referral_key(user_id) -> str:
+    return f"ref#{str(user_id).strip().lower()}"
+
+
+def _conditional_failed(e) -> bool:
+    return isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+
+
+def _credit_inviter(inviter: str, month: str) -> bool:
+    """Give the inviter REFERRAL_POSTS unless they reached this month's cap."""
+    table = post_credits_table()
+    values = {":n": REFERRAL_POSTS, ":one": 1, ":m": month}
+    try:
+        table.update_item(
+            Key={"userId": inviter},
+            UpdateExpression="ADD balance :n, referralPosts :n, invitesTotal :one, invitesThisMonth :one",
+            ConditionExpression="invitesMonth = :m AND invitesThisMonth < :cap",
+            ExpressionAttributeValues={**values, ":cap": REFERRAL_MONTHLY_CAP})
+        return True
+    except ClientError as e:
+        if not _conditional_failed(e):
+            raise
+    try:
+        # First reward this month (or ever): start the month's count.
+        table.update_item(
+            Key={"userId": inviter},
+            UpdateExpression="ADD balance :n, referralPosts :n, invitesTotal :one "
+                             "SET invitesMonth = :m, invitesThisMonth = :one",
+            ConditionExpression="attribute_not_exists(invitesMonth) OR invitesMonth <> :m",
+            ExpressionAttributeValues=values)
+        return True
+    except ClientError as e:
+        if _conditional_failed(e):
+            return False  # this month's cap is reached
+        raise
+
+
+def reward_referral(user_id: str) -> int:
+    """Call after a user's post or request is saved. Returns the extra posts the user just
+    got for having been invited (0 almost always). Never raises: a failed reward must
+    never fail the post."""
+    table = post_credits_table()
+    now = datetime.now(timezone.utc)
+    try:
+        ref = table.update_item(
+            Key={"userId": referral_key(user_id)},
+            UpdateExpression="SET rewardedAt = :now",
+            ConditionExpression="attribute_exists(invitedBy) AND attribute_not_exists(rewardedAt)",
+            ExpressionAttributeValues={":now": now.isoformat()},
+            ReturnValues="ALL_NEW")["Attributes"]
+    except ClientError as e:
+        if not _conditional_failed(e):  # not invited, or already rewarded: the usual case
+            logger.exception("Referral lookup failed")
+        return 0
+    except BotoCoreError:
+        logger.exception("Referral lookup failed")
+        return 0
+    try:
+        if ref.get("emailHash"):
+            try:
+                table.update_item(Key={"userId": f"refemail#{ref['emailHash']}"},
+                                  UpdateExpression="SET usedAt = :now",
+                                  ConditionExpression="attribute_not_exists(usedAt)",
+                                  ExpressionAttributeValues={":now": now.isoformat()})
+            except ClientError as e:
+                if _conditional_failed(e):
+                    logger.info("Referral skipped: this email was already rewarded")
+                    return 0
+                raise
+        table.update_item(Key={"userId": str(user_id)},
+                          UpdateExpression="ADD balance :n, referralPosts :n",
+                          ExpressionAttributeValues={":n": REFERRAL_POSTS})
+        inviter_paid = _credit_inviter(str(ref["invitedBy"]), now.strftime("%Y-%m"))
+        table.update_item(Key={"userId": referral_key(user_id)},
+                          UpdateExpression="SET inviterRewarded = :b",
+                          ExpressionAttributeValues={":b": inviter_paid})
+        logger.info("Referral rewarded (inviter credited: %s)", inviter_paid)
+        return REFERRAL_POSTS
+    except (BotoCoreError, ClientError):
+        logger.exception("Referral reward failed part way")
+        return 0
+
+
+def invite_stats(user_id: str) -> dict:
+    """For GET /post-credits: the user's invite progress."""
+    row = _credits_row(user_id)
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    total = int(row.get("invitesTotal") or 0)
+    return {"invitesTotal": total,
+            "invitesThisMonth": int(row.get("invitesThisMonth") or 0) if row.get("invitesMonth") == month else 0,
+            "inviteMonthlyCap": REFERRAL_MONTHLY_CAP, "referralPosts": REFERRAL_POSTS,
+            "communityBuilderAt": COMMUNITY_BUILDER_INVITES,
+            "communityBuilder": total >= COMMUNITY_BUILDER_INVITES}
+
+
+def is_community_builder(user_id: str) -> bool:
+    try:
+        return int(_credits_row(user_id).get("invitesTotal") or 0) >= COMMUNITY_BUILDER_INVITES
+    except (BotoCoreError, ClientError):
+        logger.exception("Could not read invite count")
+        return False
+
+
 def post_allowance(table, user_id: str):
     """(None, spent) while the user may post here, else (429 or 500 response, False).
 

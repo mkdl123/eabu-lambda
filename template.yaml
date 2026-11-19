@@ -403,6 +403,16 @@ Resources:
                 - dynamodb:GetItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${BlockedEmailsTableName}'
+            - Effect: Allow   # save who invited the new user
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
+            - Effect: Allow   # check the "Invited by" User Id exists
+              Action:
+                - cognito-idp:AdminGetUser
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cognito-idp:${Region}:${AWS::AccountId}:userpool/${UserPoolId}'
 
   EabuPreSignupCognitoPermission:
     Type: AWS::Lambda::Permission
@@ -573,6 +583,11 @@ Resources:
                 - s3:GetObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
+            - Effect: Allow   # Community Builder badge (invite count)
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   ProviderGetMoveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -732,6 +747,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
+            - Effect: Allow   # invite rewards (helpers.reward_referral)
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   ConsumerPostLiveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -747,6 +767,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}'
+            - Effect: Allow   # invite rewards (helpers.reward_referral)
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   ConsumerPostEatFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -762,6 +787,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}'
+            - Effect: Allow   # invite rewards (helpers.reward_referral)
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   ConsumerGetMoveFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -1327,6 +1357,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
+            - Effect: Allow   # invite rewards (helpers.reward_referral)
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
   ConsumerGetLifestyleFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

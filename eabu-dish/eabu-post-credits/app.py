@@ -43,7 +43,8 @@ def _get(event):
         return denied
     used = helpers.monthly_post_counts(user_id)
     return helpers._response(200, _balance_body(user_id, helpers.post_credit_balance(user_id),
-                                                used=used, usedTotal=sum(used.values())))
+                                                used=used, usedTotal=sum(used.values()),
+                                                invites=helpers.invite_stats(user_id)))
 
 
 def credit_pack(user_id, tx):
