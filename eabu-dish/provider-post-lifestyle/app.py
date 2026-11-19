@@ -10,7 +10,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-REQUIRED_FIELDS = ["zipcode", "title", "description", "phone", "userId", "latitude", "longitude"]
+# A phone number or an email (or both) is also required: helpers.seller_contact.
+REQUIRED_FIELDS = ["zipcode", "title", "description", "userId", "latitude", "longitude"]
 
 # Resolve environment configuration
 table_name = os.environ.get("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider")
@@ -29,6 +30,7 @@ def lambda_handler(event, context):
     try:
         payload = helpers._parse_body(event)
         helpers._validate_payload(payload, REQUIRED_FIELDS)
+        phone, email = helpers.seller_contact(payload, "phone", "email")
     except ValueError as ve:
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
@@ -53,12 +55,14 @@ def lambda_handler(event, context):
         "interested_by": 0,
         "totalstars": 0,
         "ratingscount": 0,
-        "phone": payload["phone"],
+        "phone": phone,
         "latitude": str(payload["latitude"]),
         "longitude": str(payload["longitude"]),
         "createdAt": str(datetime.now().isoformat()),
         "expiresAt": helpers.post_expires_at(),  # DynamoDB TTL deletes the post then
     }
+    if email:
+        item["email"] = email
     # Optional street address so buyers/sellers can find the place on a map.
     address = helpers.optional_address(payload)
     if address:

@@ -330,3 +330,36 @@ def test_repost_of_expired_listing_respects_post_limit(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "enforce")
     assert repost(901, user="mallory")["statusCode"] == 404
     assert repost(424242)["statusCode"] == 404
+
+
+@mock_aws
+@pytest.mark.parametrize("category", ["eat", "live", "move", "lifestyle"])
+def test_seller_post_needs_a_phone_or_an_email(category):
+    make_tables()
+    fn = load(f"provider-post-{category}")
+    base = {"zipcode": ZIP, "title": "Trainer", "description": "Home visits", "userId": "seller", **LOCATION}
+    send = lambda extra: fn.lambda_handler(post({**base, **extra}), None)
+
+    neither = send({"phone": " ", "email": ""})
+    assert neither["statusCode"] == 400 and "phone number or an email" in body(neither)["msg"]
+    assert send({})["statusCode"] == 400
+    assert send({"email": "not-an-email"})["statusCode"] == 400
+
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table(f"eabu-{category}-provider")
+    email_only = body(send({"email": " s@example.com "}))["ID"]
+    item = table.get_item(Key={"zipcode": ZIP, "ID": email_only})["Item"]
+    assert item["email"] == "s@example.com" and item["phone"] == ""
+    phone_only = body(send({"phone": "6105550100"}))["ID"]
+    assert "email" not in table.get_item(Key={"zipcode": ZIP, "ID": phone_only})["Item"]
+    assert send({"phone": "6105550100", "email": "s@example.com"})["statusCode"] == 200
+
+
+@mock_aws
+def test_seller_offer_needs_a_phone_or_an_email():
+    make_tables()
+    offer = load("provider-offer-lifestyle")
+    send = lambda item_id, **contact: offer.lambda_handler(post({**offer_payload(item_id), **contact}), None)
+    assert send(post_request(), phoneNumber="", email="")["statusCode"] == 400
+    assert send(post_request(), phoneNumber="", email="bad")["statusCode"] == 400
+    assert send(post_request(), phoneNumber="", email="s@example.com")["statusCode"] == 200
+    assert send(post_request(), phoneNumber="6105550100", email="")["statusCode"] == 200

@@ -10,6 +10,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# A phone number or an email (or both) is also required: helpers.seller_contact.
 REQUIRED_FIELDS = [
 "itemId",
 "userId",
@@ -17,8 +18,6 @@ REQUIRED_FIELDS = [
 "title",
 "description",
 "offerDescription",
-"phoneNumber",
-"email",
 "price",
 "zip",
 "latitude",
@@ -43,6 +42,7 @@ def lambda_handler(event, context):
     try:
         payload = helpers._parse_body(event)
         helpers._validate_payload(payload, REQUIRED_FIELDS)
+        phone, email = helpers.seller_contact(payload, "phoneNumber", "email")
     except ValueError as ve:
         logger.warning("Validation error: %s", ve)
         return helpers._response(400, {"msg": str(ve)})
@@ -78,8 +78,8 @@ def lambda_handler(event, context):
         "title":payload["title"],
         "itemDescription":payload["description"],
         "offerDescription":payload["offerDescription"],
-        "offererPhoneNumber":payload["phoneNumber"],
-        "offererEmail":payload["email"],
+        "offererPhoneNumber": phone,
+        "offererEmail": email,
         "price":payload["price"],
         "latitude": str(payload["latitude"]),
         "longitude": str(payload["longitude"]),

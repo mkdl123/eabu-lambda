@@ -56,6 +56,20 @@ def _validate_payload(payload: dict, REQUIRED_FIELDS):
     _validate_content(payload)
 
 
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+
+def seller_contact(payload: dict, phone_key: str = "phone", email_key: str = "email"):
+    """A seller's (phone, email): either may be left out, but not both (stripped strings)."""
+    phone = str(payload.get(phone_key) or "").strip()
+    email = str(payload.get(email_key) or "").strip()
+    if not phone and not email:
+        raise ValueError("Enter a phone number or an email address, so buyers can reach you")
+    if email and not EMAIL_RE.match(email):
+        raise ValueError("Enter a valid email address")
+    return phone, email
+
+
 def _validate_content(payload: dict):
     """Reject sexual or adult words in any user-visible text (see content_filter)."""
     field = content_filter.blocked_text_field(payload)

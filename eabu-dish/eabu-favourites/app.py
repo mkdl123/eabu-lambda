@@ -65,7 +65,7 @@ MAX_PAGE_SIZE = 50
 # long to appear in other people's feeds.
 SCAN_CACHE_SECONDS = 60
 _scan_cache = {}  # table name -> (time scanned, cutoff used, items)
-FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "addressLat", "addressLng", "phone",
+FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "addressLat", "addressLng", "phone", "email",
                "totalstars", "ratingscount", "createdAt", "picture1", "picture2", "picture3", "picture4")
 
 

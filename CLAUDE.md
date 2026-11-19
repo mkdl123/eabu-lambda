@@ -153,6 +153,10 @@ Functions follow a `{role}-{action}-{category}` pattern:
 
 GET functions query DynamoDB by `zipcode` (partition key) + `ID > 0`, filtered to records created within the last 30 days. When a `userId` path parameter is not `"NA"`, they instead query a `userId-index` GSI to return only that user's items. Use `helpers.query_all(table, ...)` rather than a single `table.query`: one call stops at 1 MB, and `query_all` follows `LastEvaluatedKey`. Create the table resource at module level (once per container), not inside the handler. Numbers go out as strings (`decimal_serializer`), which the app expects. The 16 per-category read functions (`consumer-get-*`, `provider-get-*`, `provider-my-*-services`, `consumer-*-offers`) are identical apart from the category, so keep them in step.
 
+### Seller contact (phone or email)
+
+Seller posts (`provider-post-*`, fields `phone`/`email`) and offers (`provider-offer-*`, `phoneNumber`/`email`, saved as `offererPhoneNumber`/`offererEmail`) need a phone number, an email, or both: `helpers.seller_contact` returns 400 if both are blank or the email is malformed. A post without a phone stores `phone: ""`; `email` is stored only when given and goes out in the Home feed (`FEED_FIELDS`). The app shows Call/Text for a phone and Email (`mailto:`) for an email. Buyer posts have no email.
+
 ### Post expiry (60 days)
 
 Posts in the 8 consumer/provider tables carry `expiresAt` (epoch seconds, `helpers.post_expires_at()`), set on create and refreshed on repost. DynamoDB TTL on `expiresAt` deletes them about 60 days after the last post or repost (`helpers.POST_TTL_DAYS`). Seller pictures under `listings/` in the picture bucket expire 60 days after their last write (S3 lifecycle rule `ExpireListingPicturesAfter60Days`), and `provider-repost` copies them onto themselves (`helpers.refresh_listing_pictures`) to restart their clock. `scripts/enable_post_expiry.py [--dry-run]` turns this on and backfills `expiresAt` on existing posts; it is safe to re-run.
