@@ -1,4 +1,4 @@
-"""Report a post, request, offer, ad or profile (App Store guideline 1.2).
+"""Report a post, request, offer, ad, profile or discovered find (App Store guideline 1.2).
 
 POST /report  body {"userId", "reportedUserId", "contentType", "reason",
                     "category"?, "itemId"?, "zipcode"?, "title"?, "details"?}
@@ -27,7 +27,9 @@ ses = boto3.client("ses", region_name=REGION)
 SENDER = f"Eabu <{os.environ.get('SENDER_EMAIL', 'eabu@eabu.net')}>"
 REPORT_EMAIL = os.environ.get("REPORT_EMAIL", "")
 
-CONTENT_TYPES = ("post", "request", "offer", "ad", "profile")
+# "discovered": a "Discovered near you" find from the web; reportedUserId is then "eabu-discovered",
+# zipcode its areaZip and itemId its ID (scripts/moderate.py remove-discovered).
+CONTENT_TYPES = ("post", "request", "offer", "ad", "profile", "discovered")
 REASONS = {
     "spam": "Spam or misleading",
     "offensive": "Offensive, hateful or sexual content",

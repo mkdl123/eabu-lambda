@@ -13,6 +13,9 @@ changes something only shows what it would do until you add --yes.
                                                         # delete its posts and offers, take its ads down
     python3 scripts/moderate.py unban <userId> --yes    # let the account sign in again (posts stay deleted)
     python3 scripts/moderate.py resolve <reportID> [--note "removed post"] --yes
+    python3 scripts/moderate.py remove-discovered <areaZip> <ID> --yes
+                                                        # delete a "Discovered near you" find (its report
+                                                        # email shows the area ZIP and ID)
     python3 scripts/moderate.py unblock-email <email> --yes
                                                         # lift the 30-day sign-up block left by a
                                                         # deleted account, so the email can sign up now
@@ -37,6 +40,7 @@ PICTURE_BUCKET = "eabu-identity-pictures"
 FEEDBACK_TABLE = "eabu-feedback"
 BLOCKED_EMAILS_TABLE = "eabu-blocked-emails"
 AD_TABLE = "eabu-advertisement"
+DISCOVERED_TABLE = "eabu-discovered"
 CATEGORIES = ("eat", "live", "move", "lifestyle")
 ROLES = {"listing": "provider", "request": "consumer"}
 PICTURE_SLOTS = ("1", "2", "3", "4")
@@ -210,6 +214,10 @@ def main(argv=None):
     rs.add_argument("report_id")
     rs.add_argument("--note", default="")
     rs.add_argument("--yes", action="store_true")
+    rd = sub.add_parser("remove-discovered")
+    rd.add_argument("area_zip")
+    rd.add_argument("item_id", type=int)
+    rd.add_argument("--yes", action="store_true")
     ue = sub.add_parser("unblock-email")
     ue.add_argument("email")
     ue.add_argument("--yes", action="store_true")
@@ -294,6 +302,21 @@ def main(argv=None):
             print(f"No report #{args.report_id}.")
             return 1
         print(f"Report #{args.report_id} marked resolved.")
+        return 0
+    if args.cmd == "remove-discovered":
+        table = ddb.Table(DISCOVERED_TABLE)
+        key = {"areaZip": args.area_zip, "ID": args.item_id}
+        item = table.get_item(Key=key).get("Item") if args.item_id else None
+        if not item:
+            print("No such find (check the area ZIP and ID).")
+            return 1
+        print(f"{args.area_zip} {args.item_id}: {_short(item.get('headline'))} at {_short(item.get('place'), 40)}"
+              f" ({item.get('sourceUrl')})")
+        if not args.yes:
+            print("Not deleted. Add --yes to delete it.")
+            return 0
+        table.delete_item(Key=key)
+        print("Deleted. Phones may show it for up to 10 more minutes (the API caches finds).")
         return 0
     if args.cmd == "unblock-email":
         table = ddb.Table(BLOCKED_EMAILS_TABLE)

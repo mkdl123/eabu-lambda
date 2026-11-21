@@ -63,6 +63,7 @@ ROUTES=(
   "POST /apple-iap-notifications EabuAppleNotificationsFunction"
   "POST /share-link EabuPublicPostFunction"
   "GET /public-post/{token} EabuPublicPostFunction"
+  "GET /discovered EabuDiscoveredFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.

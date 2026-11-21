@@ -225,6 +225,14 @@ Parameters:
     Type: String
     Default: eabu-blocked-emails
     Description: Hashed emails of recently deleted accounts (scripts/create-blocked-emails-table.sh).
+  DiscoveredTableName:
+    Type: String
+    Default: eabu-discovered
+    Description: Weekly "Discovered near you" food finds per area (scripts/create-discovered-table.sh).
+  DiscoverMaxAreas:
+    Type: String
+    Default: "40"
+    Description: Most areas the weekly discover job searches (busiest first); each costs roughly $0.15-0.30.
 
   IdentityPoolId:
     Type: String
@@ -1327,6 +1335,89 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/eabu.net'
                 - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/*@*'
 
+
+  # Mondays: web-searches new food finds per area with Claude (one async run per area).
+  EabuDiscoverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-discover
+      Handler: app.lambda_handler
+      Timeout: 300   # one area: about 1-2 minutes of searching
+      Environment:
+        Variables:
+          DISCOVERED_TABLE_NAME: !Ref DiscoveredTableName
+          DISCOVER_MAX_AREAS: !Ref DiscoverMaxAreas
+      EventInvokeConfig:
+        MaximumRetryAttempts: 1   # a failed area tries once more, then waits for next week
+      Events:
+        Weekly:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 10 ? * MON *)   # 10:00 UTC Monday = 5 or 6 am US Eastern
+            Description: Discovered near you (weekly food finds)
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow   # which ZIPs have posts (ZIP only)
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleProviderTableName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:BatchWriteItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${DiscoveredTableName}'
+            - Effect: Allow   # the Claude API key (SecureString, AWS-managed key)
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/anthropic-api-key'
+            - Effect: Allow   # starts itself once per area
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:lambda:${Region}:${AWS::AccountId}:function:${AWS::StackName}-EabuDiscoverFunction-*'
+
+  # GET /discovered?zip= : this week's finds for the caller's area.
+  EabuDiscoveredFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-discovered
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          DISCOVERED_TABLE_NAME: !Ref DiscoveredTableName
+          DISCOVER_FUNCTION_NAME: !Ref EabuDiscoverFunction
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow   # read finds; record views; create a new area (+ daily cap counter)
+              Action:
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${DiscoveredTableName}'
+            - Effect: Allow   # first search for a new area
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !GetAtt EabuDiscoverFunction.Arn
 
   ProviderGetLifestyleFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
