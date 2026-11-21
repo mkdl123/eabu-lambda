@@ -45,10 +45,10 @@ FIELDS = ("ID", "areaZip", "headline", "place", "addressOrArea", "what", "when",
 _cache = None  # (time loaded, {areaZip: area row}, {areaZip: [finds]})
 
 
-def _load():
+def _load(force=False):
     """The whole table (a few hundred rows at most), kept for CACHE_SECONDS per container."""
     global _cache
-    if _cache and time.time() - _cache[0] < CACHE_SECONDS:
+    if not force and _cache and time.time() - _cache[0] < CACHE_SECONDS:
         return _cache[1], _cache[2]
     areas, finds, kwargs = {}, {}, {}
     while True:
@@ -183,6 +183,16 @@ def lambda_handler(event, context):
     now = int(time.time())
     zip5 = helpers._norm_zip(zip_code)
     centre = area_for(zip5, areas, finds, now)
+    if not centre and helpers.is_known_zip(zip5):
+        # This container's copy may predate an area another user's request just created (same
+        # or nearby ZIP): re-read before treating the ZIP as new, so nobody waits for the cache
+        # or starts a second search for the same place.
+        try:
+            areas, finds = _load(force=True)
+        except (BotoCoreError, ClientError):
+            logger.exception("Could not re-read discovered finds")
+            return helpers._response(500, {"msg": "Could not load. Please try again."})
+        centre = area_for(zip5, areas, finds, now)
     if centre:
         _mark_viewed(centre, areas[centre], now)
     elif start_new_area(zip5, areas, now):

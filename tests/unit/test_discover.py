@@ -210,3 +210,26 @@ def test_area_with_current_finds_wins_over_an_empty_one():
 def test_report_accepts_discovered_finds():
     fn = load("eabu-report")
     assert "discovered" in fn.CONTENT_TYPES
+
+
+@mock_aws
+def test_a_stale_cache_doesnt_hide_or_repeat_a_new_area():
+    table = make_discovered()
+    fn = load("eabu-discovered")
+    started = []
+    fn.lambda_client = SimpleNamespace(invoke=lambda **kw: started.append(json.loads(kw["Payload"])["areaZip"]))
+
+    def get(z):
+        res = fn.lambda_handler({"httpMethod": "GET", "queryStringParameters": {"zip": z},
+                                 "requestContext": {"authorizer": {"claims": {"sub": "u"}}}}, None)
+        return json.loads(res["body"])
+
+    fn._load()                                   # this container cached the table while it was empty
+    # Meanwhile another container created the Missoula area, and its search saved a find.
+    table.put_item(Item={"areaZip": "59801", "ID": 0, "zips": ["59801"], "lastViewedAt": 1})
+    table.put_item(Item={"areaZip": "59801", "ID": 2026112301, "headline": "Huckleberry pie",
+                         "expiresAt": 10**10, "weekOf": "2026-11-23"})
+    for z in ("59801", "59802"):                 # same ZIP, and a neighbour
+        body = get(z)
+        assert body["areaZip"] == "59801" and [i["headline"] for i in body["Items"]] == ["Huckleberry pie"]
+    assert started == []                          # no second search
