@@ -9,6 +9,9 @@ first search starts at once (cards appear a minute or two later); at most NEW_AR
 a day (UTC), beyond that it waits for Monday. Viewing an area marks it (lastViewedAt, at most
 once a day) so the Monday run keeps searching it; unviewed areas drop out after 28 days.
 
+GET /guest/discovered?zip=&v=2 is the same for guests (public route, no sign-in; rate limited
+per IP address).
+
 Cards are top-rated places (category eat or lifestyle) and Ticketmaster events (lifestyle,
 kind event; hidden once their day has passed, US Eastern). Without ?v=2 (app 1.7) only eat places
 and the older news finds come back, since that build only knows food cards.
@@ -45,6 +48,10 @@ DISCOVER_FUNCTION = os.environ.get("DISCOVER_FUNCTION_NAME", "")
 AREA_MILES = 25
 AREA_ROW = 0
 NEW_AREAS_PER_DAY = int(os.environ.get("DISCOVER_NEW_AREAS_PER_DAY", "20"))
+# Guests (GET /guest/discovered, before sign-up) may start a new area's first search too, so a
+# newcomer's Home isn't empty; they share the NEW_AREAS_PER_DAY cap. "false" limits guests to
+# areas that already exist.
+GUEST_CAN_START_AREAS = os.environ.get("GUEST_CAN_START_AREAS", "true").strip().lower() != "false"
 VIEWED_DAYS = 28
 DAY = 86400
 CACHE_SECONDS = 600  # the table changes once a week
@@ -197,9 +204,11 @@ def _fresh(centre, areas, finds, now):
 def lambda_handler(event, context):
     if (event.get("httpMethod") or "GET").upper() != "GET":
         return helpers._response(405, {"msg": "Method not allowed"})
-    denied = helpers.require_authenticated(event)
-    if denied:
-        return denied
+    guest = helpers.is_guest_route(event)  # GET /guest/discovered: public, browsing before sign-up
+    if not guest:
+        denied = helpers.require_authenticated(event)
+        if denied:
+            return denied
     params = event.get("queryStringParameters") or {}
     zip_code = (params.get("zip") or "").strip()
     try:
@@ -229,7 +238,7 @@ def lambda_handler(event, context):
         centre = area_for(zip5, areas, finds, now)
     if centre:
         _mark_viewed(centre, areas[centre], now)
-    elif start_new_area(zip5, areas, now):
+    elif (not guest or GUEST_CAN_START_AREAS) and start_new_area(zip5, areas, now):
         centre = zip5
     items = _live(finds.get(centre), now) if centre else []
     if centre and not items and (areas.get(centre) or {}).get("pending"):

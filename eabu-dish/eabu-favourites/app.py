@@ -19,6 +19,14 @@ Either feed with ?map=1 returns only posts whose poster added an address with a 
 (addressLat/addressLng), unpaged (limit/cursor are ignored), up to MAP_MAX_POSTS: the Home
 screen's Map view shows them all at once.
 
+GET    /guest/feed?zip=12345[&kind=seller|buyer]   PUBLIC (no sign-in): what a guest sees before
+                                                   creating an account. Everyone's current posts of that
+                                                   kind (default seller) within 50 miles, paged and ?map=1
+                                                   like the nearby feed, but without phone, email or
+                                                   street address (sign-up unlocks contact) and with the
+                                                   map pin rounded to about half a mile. Rate limited per
+                                                   IP address (helpers.rate_limited).
+
 kind is "seller" (a buyer's favourite sellers: their service listings) or "buyer" (a seller's
 favourite buyers: their requests). The list routes also take kind "blocked" (users the caller
 has blocked, up to 500); blocked users' posts never appear in the caller's feeds. Favourites are
@@ -65,6 +73,13 @@ MAX_PAGE_SIZE = 50
 # long to appear in other people's feeds.
 SCAN_CACHE_SECONDS = 60
 _scan_cache = {}  # table name -> (time scanned, cutoff used, items)
+# Guests (not signed in) never get these: contacting a seller is what an account is for.
+GUEST_HIDDEN_FIELDS = ("phone", "email", "address")
+GUEST_PIN_PLACES = 2  # ~0.7 mile: shows the neighbourhood, not the door
+# Contact details typed into a title or description are masked for guests too.
+_EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_IN_TEXT = re.compile(r"(?<!\w)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\w)")
+GUEST_MASK = "[sign up to see]"
 FEED_FIELDS = ("ID", "zipcode", "userId", "title", "description", "address", "addressLat", "addressLng", "phone", "email",
                "totalstars", "ratingscount", "createdAt", "picture1", "picture2", "picture3", "picture4")
 
@@ -312,6 +327,47 @@ def nearby_feed(event, user_id, kind, zip_code):
     return _json(200, result)
 
 
+def _guest_post(post):
+    out = {k: v for k, v in post.items() if k not in GUEST_HIDDEN_FIELDS}
+    for k in ("title", "description"):
+        if isinstance(out.get(k), str):
+            out[k] = _PHONE_IN_TEXT.sub(GUEST_MASK, _EMAIL_IN_TEXT.sub(GUEST_MASK, out[k]))
+    for k in ("addressLat", "addressLng"):
+        if k in out:
+            try:
+                out[k] = round(Decimal(str(out[k])), GUEST_PIN_PLACES)
+            except ArithmeticError:
+                out.pop(k)
+    out["contactHidden"] = True
+    return out
+
+
+def guest_feed(event):
+    """Everyone's current posts near ?zip for someone who hasn't signed up: no contact details."""
+    query = event.get("queryStringParameters") or {}
+    kind = str(query.get("kind") or "seller")
+    if kind not in FEED_KINDS:
+        return helpers._response(400, {"msg": "kind must be seller or buyer"})
+    zip_code = str(query.get("zip") or "").strip()[:10]
+    if not helpers._norm_zip(zip_code):
+        return helpers._response(400, {"msg": "A 5-digit zip is required"})
+    map_only, limit, after = _paging_or_map(event)
+    cutoff = helpers.post_limit_cutoff()
+    posts = []
+    for category in CATEGORIES:
+        found = [{k: i[k] for k in FEED_FIELDS if k in i} for i in _recent_posts(_table_for(kind, category), cutoff)]
+        found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
+        posts += [{**p, "category": category} for p in found]
+    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS)
+    if kind == "seller":
+        _attach_pictures(posts)  # only for the posts being sent
+    posts = [_guest_post(p) for p in posts]
+    result = {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES}
+    if limit is not None:
+        result["nextCursor"] = next_cursor
+    return _json(200, result)
+
+
 @helpers.cors
 @helpers.rate_limited
 def lambda_handler(event, context):
@@ -319,6 +375,10 @@ def lambda_handler(event, context):
         method = (event.get("httpMethod") or "").upper()
         resource = event.get("resource") or ""
         path = event.get("pathParameters") or {}
+        if helpers.is_guest_route(event):  # public: only the guest feed, read-only
+            if method == "GET" and resource == "/guest/feed":
+                return guest_feed(event)
+            return helpers._response(404, {"msg": "Not found"})
         if method == "POST":
             return add_favourite(event)
         if method == "DELETE":

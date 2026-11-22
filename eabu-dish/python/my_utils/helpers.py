@@ -118,7 +118,8 @@ def cors(handler):
 # The read routes that show other people's posts and profiles (category lists, Home feed,
 # Discovered, profiles, ratings, ads) count each signed-in caller's requests per UTC hour in
 # the eabu-rate-limit table (key "<userId>#<yyyymmddhh>", TTL expiresAt). Past
-# READ_LIMIT_PER_HOUR the caller gets 429 RATE_LIMITED until the next hour. A real user never
+# READ_LIMIT_PER_HOUR the caller gets 429 RATE_LIMITED until the next hour. Guests (the public
+# /guest/... routes) are counted per IP address instead ("ip#<address>#<hour>"). A real user never
 # gets near it; a script copying the feed is stopped quickly. If the counter can't be updated
 # the request goes through (never break the app over the limiter).
 # ---------------------------------------------------------------------------
@@ -133,14 +134,33 @@ def _rate_limit_table():
     return _rate_table
 
 
-def read_limit_per_hour() -> int:
+def _int_env(name, default) -> int:
     try:
-        return max(1, int(os.environ.get("READ_LIMIT_PER_HOUR", "600")))
+        return max(1, int(os.environ.get(name, str(default))))
     except ValueError:
-        return 600
+        return default
 
 
-def over_read_limit(user_id, now=None) -> bool:
+def read_limit_per_hour() -> int:
+    return _int_env("READ_LIMIT_PER_HOUR", 600)
+
+
+def guest_limit_per_hour() -> int:
+    """Reads per IP address per hour on the guest routes (no account to count against). Higher
+    than the per-user limit because phone carriers put many people behind one address."""
+    return _int_env("GUEST_LIMIT_PER_HOUR", 1200)
+
+
+def is_guest_route(event) -> bool:
+    """True for the public /guest/... routes (browsing before sign-up; no Cognito authorizer)."""
+    return str((event or {}).get("resource") or "").startswith("/guest/")
+
+
+def source_ip(event):
+    return (((event or {}).get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
+
+
+def over_read_limit(user_id, now=None, limit=None) -> bool:
     """Count one read for user_id this hour; True once they're past the hourly limit."""
     if not user_id:
         return False
@@ -153,17 +173,25 @@ def over_read_limit(user_id, now=None) -> bool:
             ExpressionAttributeValues={":one": 1, ":exp": int(now.timestamp()) + 2 * 3600},
             ReturnValues="UPDATED_NEW",
         )
-        return int(res["Attributes"]["n"]) > read_limit_per_hour()
+        return int(res["Attributes"]["n"]) > (limit or read_limit_per_hour())
     except Exception:  # noqa: BLE001 - fail open, never block real users over the limiter
         logger.warning("Read limit check failed")
         return False
 
 
 def rate_limited(handler):
-    """Answer 429 RATE_LIMITED when the signed-in caller is past their hourly read limit."""
+    """Answer 429 RATE_LIMITED when the signed-in caller (or, on a guest route, the caller's IP
+    address) is past their hourly read limit."""
     @functools.wraps(handler)
     def wrapper(event, context):
-        if over_read_limit(get_caller_id(event)):
+        caller = get_caller_id(event)
+        if caller:
+            over = over_read_limit(caller)
+        elif is_guest_route(event) and source_ip(event):
+            over = over_read_limit(f"ip#{source_ip(event)}", limit=guest_limit_per_hour())
+        else:
+            over = False
+        if over:
             logger.info("Read limit reached")
             return _response(429, {"error": "Too many requests. Please try again later.",
                                    "code": "RATE_LIMITED"})

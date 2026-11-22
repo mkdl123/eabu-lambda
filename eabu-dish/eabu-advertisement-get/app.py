@@ -209,7 +209,8 @@ def decimal_serializer(obj):
 @helpers.cors
 @helpers.rate_limited
 def lambda_handler(event, context):
-    status = event['pathParameters']['status']
+    # GET /guest/ads?zip= (public, before sign-up) lists the active ads, the same as /eabu-ad/active.
+    status = 'active' if helpers.is_guest_route(event) else (event.get('pathParameters') or {}).get('status')
 
     # Anything not explicitly published (pending, rejected, drafts...) stays private.
     if str(status).strip().lower() not in _public_statuses():
