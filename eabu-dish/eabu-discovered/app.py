@@ -193,6 +193,7 @@ def _fresh(centre, areas, finds, now):
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     if (event.get("httpMethod") or "GET").upper() != "GET":
         return helpers._response(405, {"msg": "Method not allowed"})

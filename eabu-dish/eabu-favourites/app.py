@@ -313,6 +313,7 @@ def nearby_feed(event, user_id, kind, zip_code):
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     try:
         method = (event.get("httpMethod") or "").upper()

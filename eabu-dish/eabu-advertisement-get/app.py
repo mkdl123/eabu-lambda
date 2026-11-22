@@ -207,6 +207,7 @@ def decimal_serializer(obj):
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     status = event['pathParameters']['status']
 

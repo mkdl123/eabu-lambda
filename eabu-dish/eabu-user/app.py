@@ -28,6 +28,7 @@ def _picture_exists(key):
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     denied = helpers.require_authenticated(event)
     if denied:

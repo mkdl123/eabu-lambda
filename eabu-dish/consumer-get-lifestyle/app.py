@@ -25,6 +25,7 @@ def decimal_serializer(obj):
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     zip_code = event['pathParameters']['zip']
     # last 30 days including today (UTC) -> now - 29 days

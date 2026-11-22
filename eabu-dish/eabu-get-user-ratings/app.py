@@ -107,6 +107,7 @@ def _sum_ratings_for_user(table, pUserId: str) -> tuple[int, int]:
 
 
 @helpers.cors
+@helpers.rate_limited
 def lambda_handler(event, context):
     logger.info("Received event: %s", json.dumps({k: event.get(k) for k in ("httpMethod", "queryStringParameters")}))
 

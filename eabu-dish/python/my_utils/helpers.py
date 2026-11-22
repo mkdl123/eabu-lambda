@@ -113,6 +113,65 @@ def cors(handler):
 
 
 # ---------------------------------------------------------------------------
+# Per-user read limit (anti-scraping)
+#
+# The read routes that show other people's posts and profiles (category lists, Home feed,
+# Discovered, profiles, ratings, ads) count each signed-in caller's requests per UTC hour in
+# the eabu-rate-limit table (key "<userId>#<yyyymmddhh>", TTL expiresAt). Past
+# READ_LIMIT_PER_HOUR the caller gets 429 RATE_LIMITED until the next hour. A real user never
+# gets near it; a script copying the feed is stopped quickly. If the counter can't be updated
+# the request goes through (never break the app over the limiter).
+# ---------------------------------------------------------------------------
+_rate_table = None
+
+
+def _rate_limit_table():
+    global _rate_table
+    if _rate_table is None:
+        _rate_table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us-east-1")).Table(
+            os.environ.get("RATE_LIMIT_TABLE_NAME", "eabu-rate-limit"))
+    return _rate_table
+
+
+def read_limit_per_hour() -> int:
+    try:
+        return max(1, int(os.environ.get("READ_LIMIT_PER_HOUR", "600")))
+    except ValueError:
+        return 600
+
+
+def over_read_limit(user_id, now=None) -> bool:
+    """Count one read for user_id this hour; True once they're past the hourly limit."""
+    if not user_id:
+        return False
+    now = now or datetime.now(timezone.utc)
+    hour = now.strftime("%Y%m%d%H")
+    try:
+        res = _rate_limit_table().update_item(
+            Key={"key": f"{str(user_id).lower()}#{hour}"},
+            UpdateExpression="ADD n :one SET expiresAt = if_not_exists(expiresAt, :exp)",
+            ExpressionAttributeValues={":one": 1, ":exp": int(now.timestamp()) + 2 * 3600},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(res["Attributes"]["n"]) > read_limit_per_hour()
+    except Exception:  # noqa: BLE001 - fail open, never block real users over the limiter
+        logger.warning("Read limit check failed")
+        return False
+
+
+def rate_limited(handler):
+    """Answer 429 RATE_LIMITED when the signed-in caller is past their hourly read limit."""
+    @functools.wraps(handler)
+    def wrapper(event, context):
+        if over_read_limit(get_caller_id(event)):
+            logger.info("Read limit reached")
+            return _response(429, {"error": "Too many requests. Please try again later.",
+                                   "code": "RATE_LIMITED"})
+        return handler(event, context)
+    return wrapper
+
+
+# ---------------------------------------------------------------------------
 # Authentication / authorization
 #
 # The caller's identity comes ONLY from the Cognito claims that API Gateway

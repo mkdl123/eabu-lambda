@@ -13,6 +13,10 @@ Globals:
           Ref: Region
         POST_CREDITS_TABLE_NAME:
           Ref: PostCreditsTableName
+        RATE_LIMIT_TABLE_NAME:
+          Ref: RateLimitTableName
+        READ_LIMIT_PER_HOUR:
+          Ref: ReadLimitPerHour
         EABU_FEEDBACK_TABLE_NAME:
           Ref: EabuFeedbackTableName
         EABU_DELETE_TABLE:
@@ -109,6 +113,14 @@ Parameters:
     Type: String
     Default: net.eabu.app.posts15
     Description: App Store product id of the $0.99 consumable that adds 15 extra posts.
+  RateLimitTableName:
+    Type: String
+    Default: eabu-rate-limit
+    Description: Per-user hourly read counters (anti-scraping); created by scripts/create-rate-limit-table.sh
+  ReadLimitPerHour:
+    Type: String
+    Default: '600'
+    Description: Reads per signed-in user per hour on the feed, list, profile and Discovered routes
   PostCreditsTableName:
     Type: String
     Default: eabu-post-credits
@@ -540,6 +552,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -619,6 +636,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -638,6 +660,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -653,6 +680,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -668,6 +700,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -842,6 +879,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -862,6 +904,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -882,6 +929,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -1127,6 +1179,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -1172,6 +1229,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -1406,6 +1468,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow   # read finds; record views; create a new area (+ daily cap counter)
               Action:
                 - dynamodb:Scan
@@ -1428,6 +1495,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - dynamodb:Query
@@ -1496,6 +1568,11 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow   # per-user hourly read limit
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow
               Action:
                 - s3:GetObject

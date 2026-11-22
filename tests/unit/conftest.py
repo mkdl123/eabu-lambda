@@ -30,3 +30,12 @@ def rekognition(monkeypatch):
     fake = FakeRekognition()
     monkeypatch.setattr(content_filter, "_rekognition", fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limit_table():
+    """The read limiter caches its table; drop it so each moto test gets its own."""
+    from my_utils import helpers
+    helpers._rate_table = None
+    yield
+    helpers._rate_table = None

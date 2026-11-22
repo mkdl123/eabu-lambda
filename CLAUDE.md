@@ -148,6 +148,7 @@ Functions follow a `{role}-{action}-{category}` pattern:
 - **IAM**: every function in `template.yaml` has its own least-privilege `Policies` block listing only the tables/actions/objects it uses. A new function or a new DynamoDB/S3/SES call needs a matching policy entry, or it will get AccessDenied.
 - **Identity data**: never log request bodies, images or PII; never return `str(e)`, table names or region in responses. The identity bucket is hardened by `scripts/harden-identity-bucket.sh` (run from CloudShell).
 - Security regression tests live in `tests/unit/test_security.py` (moto-based).
+- **Anti-scraping**: the API stage `dev` is throttled to 50 requests/s (burst 100), set by hand with `aws apigateway update-stage` (it was the 10,000/s default). The 13 read routes that show other people's data (`consumer-get-*`, `provider-get-*`, `eabu-favourites`, `eabu-discovered`, `eabu-user`, `eabu-get-user-ratings`, `eabu-advertisement-get`) carry `@helpers.rate_limited`: each signed-in user gets `ReadLimitPerHour` (600) reads per UTC hour, counted in `eabu-rate-limit` (`scripts/create-rate-limit-table.sh`, TTL), then 429 `RATE_LIMITED`. It fails open. A new read route showing others' data should get the decorator and the table's `UpdateItem` policy.
 
 ### Get functions: query pattern
 
