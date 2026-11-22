@@ -366,3 +366,18 @@ def test_map_pins_only_for_plausible_points(monkeypatch):
     ev["_embedded"]["venues"][0]["location"] = loc
     [card] = fn.pick_events([ev], today=TODAY, area_zip="19060")
     assert card["addressLat"] == "40.104300" and card["addressLng"] == "-75.149700"
+
+
+def test_event_picture_is_the_16_9_one_nearest_640px():
+    fn = load("eabu-discover")
+    img = "https://s1.ticketm.net/dam/a/1/{}.jpg".format
+    [card] = fn.pick_events([tm_event(images=[
+        {"ratio": "4_3", "url": img("square"), "width": 640, "height": 480},
+        {"ratio": "16_9", "url": img("big"), "width": 2048, "height": 1152},
+        {"ratio": "16_9", "url": img("card"), "width": 640, "height": 360},
+        {"ratio": "16_9", "url": img("generic"), "width": 640, "height": 360, "fallback": True},
+    ])], today=TODAY)
+    assert card["imageUrl"] == img("card")
+    [plain] = fn.pick_events([tm_event(images=[{"ratio": "16_9", "url": "http://x/a.jpg", "width": 640}])],
+                             today=TODAY)
+    assert plain["imageUrl"] == ""

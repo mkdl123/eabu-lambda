@@ -65,6 +65,7 @@ MODEL = os.environ.get("DISCOVER_MODEL", "claude-haiku-5-5")
 API_KEY_PARAM = os.environ.get("ANTHROPIC_KEY_PARAM", "/eabu/anthropic-api-key")
 TM_KEY_PARAM = os.environ.get("TICKETMASTER_KEY_PARAM", "/eabu/ticketmaster-api-key")
 TM_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
+IMAGE_WIDTH = 640  # event picture size for the card thumbnail
 MAX_AREAS = int(os.environ.get("DISCOVER_MAX_AREAS", "40"))
 AREA_MILES = 25
 POST_DAYS = 60
@@ -475,6 +476,26 @@ def _event_when(start):
     return d.date(), when
 
 
+def event_image(e):
+    """The event's 16:9 Ticketmaster picture closest to IMAGE_WIDTH px wide (https only), else "".
+
+    Ticketmaster's API terms allow showing these with the event; the app hotlinks the URL."""
+    best, best_gap = "", None
+    for img in e.get("images") or []:
+        if not isinstance(img, dict) or img.get("ratio") != "16_9" or img.get("fallback"):
+            continue
+        url = str(img.get("url") or "")
+        if not url.startswith("https://") or len(url) > 500:
+            continue
+        try:
+            gap = abs(int(img.get("width") or 0) - IMAGE_WIDTH)
+        except (TypeError, ValueError):
+            continue
+        if best_gap is None or gap < best_gap:
+            best, best_gap = url, gap
+    return best
+
+
 def pick_events(raw, recent=(), today=None, area_zip=None):
     """Up to MAX_EVENTS cards: one per show name and per venue, soonest first, filtered."""
     cards, names, venues = [], set(recent), set()
@@ -509,7 +530,7 @@ def pick_events(raw, recent=(), today=None, area_zip=None):
                       "what": kind or "Live event", "when": when, "whyNew": "Coming up this week",
                       "sourceUrl": url, "sourceSite": "ticketmaster.com",
                       "sourceDate": (today or day).isoformat(), "eventDate": day.isoformat(),
-                      "eventTime": local_time, "ticketUrl": url,
+                      "eventTime": local_time, "ticketUrl": url, "imageUrl": event_image(e),
                       "mapsUrl": maps_url(venue_name, address or town), "findKey": key,
                       **(pin_fields(loc.get("latitude"), loc.get("longitude"), area_zip) if area_zip else {})})
         if len(cards) >= MAX_EVENTS:
