@@ -164,10 +164,11 @@ def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     table = make_discovered()
     fn = load("eabu-discover")
     topic = fn.topics_for_week(TODAY)[0][0]
-    fake = FakeClaude([place(), place(name="Iron Barn", topic=topic, place_type="Gym",
+    fake = FakeClaude([place(), place(name="Iron Barn", topic=topic, place_type="Gym", address_or_area="Media, PA",
                                       source_url="https://www.yelp.com/biz/iron-barn")], pause_first=True)
     fn._client = fake
     monkeypatch.setattr(fn, "fetch_events", lambda z, now: [tm_event()])
+    monkeypatch.setattr(fn, "geocode", lambda a, z: {"addressLat": "39.9", "addressLng": "-75.3"} if a[0].isdigit() else {})
     assert fn.run_area({"areaZip": "19060", "zips": ["19060", "19033"]}, now=NOW) == {"saved": 3}
 
     rows = table.scan()["Items"]
@@ -176,6 +177,7 @@ def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     assert [int(r["ID"]) for r in cards] == [2026112301, 2026112302, 2026112303]
     assert [r["place"] for r in cards] == ["Taco Heart", "Iron Barn", "The Keswick Theatre"]
     assert [r["category"] for r in cards] == ["eat", "lifestyle", "lifestyle"] and cards[2]["kind"] == "event"
+    assert cards[0]["addressLat"] == "39.9" and "addressLat" not in cards[1]   # Iron Barn: town only
     assert int(cards[0]["expiresAt"]) == int(NOW.timestamp()) + 8 * 86400 and cards[0]["weekOf"] == "2026-11-23"
     assert area["zips"] == ["19060", "19033"] and set(area["shownPlaces"]) == {"taco heart", "iron barn"}
     ask = fake.calls[0]["messages"][0]["content"]
@@ -327,3 +329,40 @@ def test_a_stale_cache_doesnt_hide_or_repeat_a_new_area():
         body = get(z)
         assert body["areaZip"] == "59801" and [i["headline"] for i in body["Items"]] == ["Huckleberry pie"]
     assert started == []                          # no second search
+
+
+def test_map_pins_only_for_plausible_points(monkeypatch):
+    fn = load("eabu-discover")
+    assert fn.pin_fields("39.879304", "-75.322375", "19060") == {"addressLat": "39.879304", "addressLng": "-75.322375"}
+    assert fn.pin_fields("38.8977", "-77.0365", "19060") == {}       # Washington: too far from 19060
+    assert fn.pin_fields(0, 0, "19060") == {} and fn.pin_fields("x", "1", "19060") == {}
+
+    calls = []
+
+    class Res:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, *a):
+            return self.body
+
+    def fake_open(req, timeout):
+        calls.append(req.full_url)
+        return Res(json.dumps({"result": {"addressMatches": [{"coordinates": {"x": -75.322375, "y": 39.879304}}]}}).encode())
+
+    monkeypatch.setattr(fn.urllib.request, "urlopen", fake_open)
+    assert fn.geocode("119 E Sellers Ave, Ridley Park, PA", "19060")["addressLat"] == "39.879304"
+    assert fn.geocode("Ridley Park, PA", "19060") == {} and len(calls) == 1   # town only: not even asked
+    assert "geocoding.geo.census.gov" in calls[0]
+
+    loc = {"latitude": "40.1043", "longitude": "-75.1497"}
+    ev = tm_event()
+    ev["_embedded"]["venues"][0]["location"] = loc
+    [card] = fn.pick_events([ev], today=TODAY, area_zip="19060")
+    assert card["addressLat"] == "40.104300" and card["addressLng"] == "-75.149700"

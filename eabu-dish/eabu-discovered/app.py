@@ -15,7 +15,8 @@ and the older news finds come back, since that build only knows food cards.
 
 Response: {"areaZip", "weekOf", "pending", "Items": [{ID, areaZip, category, topic, kind, headline,
            place, addressOrArea, what, when, whyNew, sourceUrl, sourceSite, sourceDate, placeType,
-           rating, ratingCount, ratingSite, mapsUrl, eventDate, eventTime, ticketUrl}], "Count"}
+           rating, ratingCount, ratingSite, mapsUrl, eventDate, eventTime, ticketUrl, addressLat,
+           addressLng (map pin; "" when the address couldn't be placed)}], "Count"}
 """
 import json
 import logging
@@ -47,7 +48,7 @@ DAY = 86400
 CACHE_SECONDS = 600  # the table changes once a week
 FIELDS = ("ID", "areaZip", "category", "topic", "kind", "headline", "place", "addressOrArea", "what",
           "when", "whyNew", "sourceUrl", "sourceSite", "sourceDate", "placeType", "rating", "ratingCount",
-          "ratingSite", "mapsUrl", "eventDate", "eventTime", "ticketUrl")
+          "ratingSite", "mapsUrl", "eventDate", "eventTime", "ticketUrl", "addressLat", "addressLng")
 _cache = None  # (time loaded, {areaZip: area row}, {areaZip: [finds]})
 
 

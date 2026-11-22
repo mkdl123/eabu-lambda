@@ -109,7 +109,7 @@ SAVE_TOOL = {
                         "topic": {"type": "string", "enum": ["eat"] + [t for t, _ in LIFESTYLE_TOPICS]},
                         "name": {"type": "string", "description": "The business name"},
                         "place_type": {"type": "string", "description": "Short type, e.g. 'Thai restaurant', 'Yoga studio', 'Veterinarian'"},
-                        "address_or_area": {"type": "string", "description": "Street address and town if known, else town"},
+                        "address_or_area": {"type": "string", "description": "Street address with number, town and state, e.g. '119 E Sellers Ave, Ridley Park, PA'; only the town if no street address is shown"},
                         "what": {"type": "string", "description": "One or two sentences in your own words on what people like about it"},
                         "rating": {"type": "number", "description": "The star rating exactly as shown on the source page, out of 5"},
                         "rating_count": {"type": "integer", "description": "Number of reviews shown with that rating"},
@@ -144,6 +144,7 @@ Rules:
 - The place must still be open (skip anything marked closed or permanently closed).
 - Spread your picks across the area, not all on one street, and across different kinds within a category.
 - Write descriptions in your own words; don't copy review text. No prices or promises you didn't see.
+- Give each place's street address when the page shows it (it puts the place on the app's map).
 - Nothing sexual: no adult stores, strip clubs or "massage" businesses of doubtful kind. No bars whose main
   business is alcohol, no smoke or vape shops, no cannabis dispensaries.
 - Save fetches for places you'll include. Fewer solid picks beat more weak ones.
@@ -331,6 +332,51 @@ def maps_url(name, address):
     return "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(q)
 
 
+CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+MAX_PIN_MILES = 40   # a geocoded pin this far from the area centre is a wrong match
+
+
+def _miles(lat1, lon1, lat2, lon2):
+    import math
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def pin_fields(lat, lng, area_zip):
+    """{"addressLat", "addressLng"} (strings, 6 places) for the map, or {} when the point is
+    missing, invalid or implausibly far from the area."""
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return {}
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
+        return {}
+    centre = helpers._zip_centroids().get(area_zip)
+    if centre and _miles(lat, lng, centre[0], centre[1]) > MAX_PIN_MILES:
+        return {}
+    return {"addressLat": f"{lat:.6f}", "addressLng": f"{lng:.6f}"}
+
+
+def geocode(address, area_zip):
+    """Map pin for a street address via the US Census geocoder (free, no key; public data).
+    {} for a town-only address (no house number) or no match: better no pin than a wrong one."""
+    if not re.match(r"^\s*\d+[A-Za-z]?\s+\S", str(address or "")):
+        return {}
+    url = f"{CENSUS_URL}?{urllib.parse.urlencode({'address': address, 'benchmark': 'Public_AR_Current', 'format': 'json'})}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Accept": "application/json"}), timeout=10) as res:
+            matches = ((json.load(res) or {}).get("result") or {}).get("addressMatches") or []
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        logger.warning("Census geocoder failed for an address in %s", area_zip)
+        return {}
+    if not matches:
+        return {}
+    c = matches[0].get("coordinates") or {}
+    return pin_fields(c.get("y"), c.get("x"), area_zip)
+
+
 def _rating(value):
     try:
         r = round(float(value), 1)
@@ -429,7 +475,7 @@ def _event_when(start):
     return d.date(), when
 
 
-def pick_events(raw, recent=(), today=None):
+def pick_events(raw, recent=(), today=None, area_zip=None):
     """Up to MAX_EVENTS cards: one per show name and per venue, soonest first, filtered."""
     cards, names, venues = [], set(recent), set()
     for e in raw if isinstance(raw, list) else []:
@@ -457,13 +503,15 @@ def pick_events(raw, recent=(), today=None):
         if venue_name:
             venues.add(venue_name)
         local_time = (((e.get("dates") or {}).get("start") or {}).get("localTime") or "")[:5]
+        loc = venue.get("location") or {}
         cards.append({"category": "lifestyle", "topic": "events", "kind": "event",
                       "headline": name, "place": venue_name or town, "addressOrArea": address or town,
                       "what": kind or "Live event", "when": when, "whyNew": "Coming up this week",
                       "sourceUrl": url, "sourceSite": "ticketmaster.com",
                       "sourceDate": (today or day).isoformat(), "eventDate": day.isoformat(),
                       "eventTime": local_time, "ticketUrl": url,
-                      "mapsUrl": maps_url(venue_name, address or town), "findKey": key})
+                      "mapsUrl": maps_url(venue_name, address or town), "findKey": key,
+                      **(pin_fields(loc.get("latitude"), loc.get("longitude"), area_zip) if area_zip else {})})
         if len(cards) >= MAX_EVENTS:
             break
     return cards
@@ -518,17 +566,19 @@ def run_area(event, now=None):
     this_week = {k for k, v in shown.items() if v >= int(datetime.combine(week, datetime.min.time(), timezone.utc).timestamp())}
     recent = set(shown) - this_week
 
-    events = pick_events(fetch_events(area_zip, now), today=today)
+    events = pick_events(fetch_events(area_zip, now), today=today, area_zip=area_zip)
     topics = topics_for_week(week)
     avoid = sorted(recent)
     raw, usage = ask_claude(area_zip, topics, avoid, today)
-    places = [place_row(p, today) for p in check_places(raw, topics, recent, today)]
+    places = [{**place_row(p, today), **geocode(p["address_or_area"], area_zip)}
+              for p in check_places(raw, topics, recent, today)]
     cards = places + events
     for c in places:
         shown[c["findKey"]] = now_ts
     save_area(area_zip, members or previous.get("zips"), cards, week, now_ts, shown)
-    logger.info("Discover area %s: %d of %d place(s) kept, %d event(s); %d searches, %d in / %d out tokens",
-                area_zip, len(places), len(raw), len(events), usage["searches"], usage["input"], usage["output"])
+    pinned = sum(1 for c in cards if c.get("addressLat"))
+    logger.info("Discover area %s: %d of %d place(s) kept, %d event(s), %d on the map; %d searches, %d in / %d out tokens",
+                area_zip, len(places), len(raw), len(events), pinned, usage["searches"], usage["input"], usage["output"])
     return {"saved": len(cards)}
 
 
