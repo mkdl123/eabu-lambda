@@ -91,7 +91,8 @@ LIFESTYLE_TOPICS = [
     ("beauty", "hair salons, nail salons, barbers and day spas"),
     ("pets", "veterinarians, pet groomers, dog daycare and pet boarding"),
 ]
-EAT_WHAT = "restaurants, cafes, bakeries and dessert shops"
+EAT_WHAT = ("restaurants of different cuisines (sit-down or takeout), with at most one cafe, bakery "
+            "or dessert shop")
 
 SAVE_TOOL = {
     "name": "save_places",
