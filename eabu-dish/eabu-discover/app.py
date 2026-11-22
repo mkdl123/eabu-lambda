@@ -11,24 +11,39 @@ Monday run (scheduled event):
   3. Invokes this same function once per area, asynchronously ({"areaZip": ..., ...}), so a
      slow or failed area doesn't hold up the others.
 
-Area run (that payload): asks Claude (MODEL, with web search) for new or limited food finds
-this week near the area, checks each one (source dated within MAX_SOURCE_AGE_DAYS, a specific
-https article, content filter, no repeat of last week) and saves up to MAX_FINDS in the
-discovered table. Rows expire after EXPIRE_DAYS (DynamoDB TTL on expiresAt).
+Area run (that payload) saves up to about a dozen cards for the week:
+  - Top-rated places (Claude, MODEL, with web search): EAT_PLACES restaurants/cafes, plus
+    LIFESTYLE_PER_TOPIC places for each of this week's two Lifestyle topics (LIFESTYLE_TOPICS
+    alternate weekly: fitness + yoga, then beauty + pets). A place is kept only if Claude saw a
+    rating of at least MIN_RATING with enough reviews on a specific https page, it passes the
+    content filter, and it wasn't shown in the last SKIP_DAYS days, so each week brings a
+    different set.
+  - Events this week (Ticketmaster Discovery API, music and arts & theatre within AREA_MILES),
+    up to MAX_EVENTS. Skipped while the key isn't in SSM.
+Rows expire after EXPIRE_DAYS (DynamoDB TTL on expiresAt).
 
 Table rows (eabu-discovered, key areaZip + ID):
-  ID 0                  the area: centre ZIP, member ZIPs, weekOf, last run's place/headline keys
-  ID yyyymmdd*100 + n   one find of the week starting yyyymmdd (Monday, UTC)
+  ID 0                  the area: centre ZIP, member ZIPs, weekOf, shownPlaces {name key: epoch}
+  ID yyyymmdd*100 + n   one card of the week starting yyyymmdd (Monday, UTC)
 
-Only ZIP codes go to Claude, never anything about users. Run by hand for one area:
+Card fields: category (eat | lifestyle), topic, kind (place | event), plus the 1.7 fields
+(headline, place, addressOrArea, what, when, whyNew, sourceUrl, sourceSite, sourceDate) so older
+app builds still show eat places sensibly.
+
+Only ZIP codes (and the ZIP's centre point, for Ticketmaster) leave AWS, never anything about
+users. Run by hand for one area:
   aws lambda invoke --function-name <name> --invocation-type Event \
       --cli-binary-format raw-in-base64-out --payload '{"areaZip":"19060"}' /dev/null
 """
 import json
 import logging
 import os
-import time
-from datetime import date, datetime, timedelta, timezone
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from urllib.parse import urlparse
 
 import boto3
@@ -48,77 +63,94 @@ lambda_client = boto3.client("lambda", region_name=REGION)
 
 MODEL = os.environ.get("DISCOVER_MODEL", "claude-haiku-5-5")
 API_KEY_PARAM = os.environ.get("ANTHROPIC_KEY_PARAM", "/eabu/anthropic-api-key")
+TM_KEY_PARAM = os.environ.get("TICKETMASTER_KEY_PARAM", "/eabu/ticketmaster-api-key")
+TM_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
 MAX_AREAS = int(os.environ.get("DISCOVER_MAX_AREAS", "40"))
 AREA_MILES = 25
 POST_DAYS = 60
 VIEWED_DAYS = 28
-MAX_FINDS = 8
+SKIP_DAYS = 28          # a place shown in the last 4 weeks isn't shown again
+EAT_PLACES = 4
+LIFESTYLE_PER_TOPIC = 2
+MAX_EVENTS = 4
+EVENT_DAYS = 7
+MIN_RATING = 4.0
+MIN_REVIEWS = {"eat": 50, "lifestyle": 15}   # small studios and vets have fewer reviews
 MAX_SEARCHES = 15
-MAX_FETCHES = 6
-MAX_SOURCE_AGE_DAYS = 14
+MAX_FETCHES = 8
+MAX_PER_SOURCE = 3      # a "best yoga near X" list page may back a few places
 EXPIRE_DAYS = 8
-MAX_PER_SOURCE = 2
 AREA_ROW = 0
 POST_TABLES = [f"{c}_{r}" for c in ("EAT", "LIVE", "MOVE", "LIFESTYLE") for r in ("CONSUMER", "PROVIDER")]
-LIMITS = {"headline": 100, "place": 100, "address_or_area": 150, "what": 400, "when": 200, "why_new": 200}
+LIMITS = {"name": 100, "place_type": 60, "address_or_area": 150, "what": 300, "rating_site": 40}
+
+# (topic, what to search for). Two a week, alternating, so each comes back every other week.
+LIFESTYLE_TOPICS = [
+    ("fitness", "gyms and fitness studios (strength, boxing, cycling, martial arts)"),
+    ("yoga", "yoga and pilates studios"),
+    ("beauty", "hair salons, nail salons, barbers and day spas"),
+    ("pets", "veterinarians, pet groomers, dog daycare and pet boarding"),
+]
+EAT_WHAT = "restaurants, cafes, bakeries and dessert shops"
 
 SAVE_TOOL = {
-    "name": "save_finds",
-    "description": "Save the final list of food finds. Call this exactly once, after searching.",
+    "name": "save_places",
+    "description": "Save the final list of top-rated places. Call this exactly once, after searching.",
     "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
-            "finds": {
+            "places": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "headline": {"type": "string", "description": "Short, fun one-liner, e.g. 'Sweet potato fries for breakfast'"},
-                        "place": {"type": "string", "description": "Restaurant, cafe, truck or market name"},
-                        "address_or_area": {"type": "string", "description": "Street address if known, else neighbourhood/town"},
-                        "what": {"type": "string", "description": "One or two sentences in your own words, no copied text"},
-                        "when": {"type": "string", "description": "Dates/days/hours it applies, as stated by the source"},
-                        "why_new": {"type": "string", "description": "Why it counts as new this week"},
-                        "source_url": {"type": "string"},
-                        "source_date": {"type": "string", "description": "Publish/post date of the source, YYYY-MM-DD, or 'unknown'"},
+                        "topic": {"type": "string", "enum": ["eat"] + [t for t, _ in LIFESTYLE_TOPICS]},
+                        "name": {"type": "string", "description": "The business name"},
+                        "place_type": {"type": "string", "description": "Short type, e.g. 'Thai restaurant', 'Yoga studio', 'Veterinarian'"},
+                        "address_or_area": {"type": "string", "description": "Street address and town if known, else town"},
+                        "what": {"type": "string", "description": "One or two sentences in your own words on what people like about it"},
+                        "rating": {"type": "number", "description": "The star rating exactly as shown on the source page, out of 5"},
+                        "rating_count": {"type": "integer", "description": "Number of reviews shown with that rating"},
+                        "rating_site": {"type": "string", "description": "Where the rating is from, e.g. 'Yelp', 'Tripadvisor', 'Google'"},
+                        "source_url": {"type": "string", "description": "The page where you saw the rating"},
                         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                     },
-                    "required": ["headline", "place", "address_or_area", "what", "when",
-                                 "why_new", "source_url", "source_date", "confidence"],
+                    "required": ["topic", "name", "place_type", "address_or_area", "what", "rating",
+                                 "rating_count", "rating_site", "source_url", "confidence"],
                     "additionalProperties": False,
                 },
             },
             "notes": {"type": "string"},
         },
-        "required": ["finds", "notes"],
+        "required": ["places", "notes"],
         "additionalProperties": False,
     },
 }
 
-SYSTEM = """You find what is new in local food for an app's "Discovered near you" feed.
+SYSTEM = """You pick top-rated local places for an app's "Discovered near you" feed.
 
-Search the public web for food items or food happenings near the given US ZIP code that are new or
-limited for this week: new menu items, daily/weekly specials, seasonal items, new openings, pop-ups,
-food trucks at a new spot, farmers market or food festival happenings.
+Search the public web for well-reviewed places near the given US ZIP code in the categories asked for.
 
 Rules:
-- Only include things whose source is dated within the last 14 days, or that state dates covering this week.
-  Skip anything you can't date.
-- Within about 25 miles of the ZIP. Prefer independent local places over national chain promotions.
-- Each find needs a real source URL you actually saw. It must be the specific article, post or menu page,
-  never a site's homepage or a section index. If you only saw a headline, open the page with web_fetch to
-  confirm the details first; if you can't confirm them, leave the find out.
-- Spread your searches across the whole area (nearby towns, farmers markets, food trucks), not one source.
-  Use at most 2 finds from any one article, and at most 2 holiday-menu finds in total.
-- Save fetches for the finds you'll actually include; one search result page or article per find is enough.
-- Write descriptions in your own words; don't copy text from the source.
-- No alcohol-only events, nothing sexual, no coupons that require sign-up.
-- Fewer good finds beat more weak ones. If you find nothing solid, return an empty list and say why in notes.
+- Only places with a star rating of 4.0 or higher out of 5 AND a stated number of reviews, both of which
+  you actually saw on a page (Yelp, Tripadvisor, a review site, or a list page that shows them). Copy the
+  rating and review count exactly. Never estimate, round up or guess a rating; if you can't see one, leave
+  the place out.
+- source_url is the page that shows that rating: a business page or a list page, never a site's homepage.
+- Within about 25 miles of the ZIP. Prefer independent local businesses; at most one national chain per
+  category, and only if it is clearly loved locally.
+- The place must still be open (skip anything marked closed or permanently closed).
+- Spread your picks across the area, not all on one street, and across different kinds within a category.
+- Write descriptions in your own words; don't copy review text. No prices or promises you didn't see.
+- Nothing sexual: no adult stores, strip clubs or "massage" businesses of doubtful kind. No bars whose main
+  business is alcohol, no smoke or vape shops, no cannabis dispensaries.
+- Save fetches for places you'll include. Fewer solid picks beat more weak ones.
 
-When done searching, call save_finds once with your picks, best first."""
+When done searching, call save_places once with your picks, best first within each category."""
 
 _client = None
+_tm_key = None
 
 
 def _claude():
@@ -131,12 +163,32 @@ def _claude():
     return _client
 
 
+def _ticketmaster_key():
+    """The Ticketmaster key from SSM, or "" while it hasn't been stored (events are skipped)."""
+    global _tm_key
+    if _tm_key is None:
+        try:
+            _tm_key = ssm.get_parameter(Name=TM_KEY_PARAM, WithDecryption=True)["Parameter"]["Value"].strip()
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "ParameterNotFound":
+                logger.warning("Could not read the Ticketmaster key")
+                return ""
+            _tm_key = ""
+    return _tm_key
+
+
 # ---------------------------------------------------------------------------
 # Weekly run: areas
 # ---------------------------------------------------------------------------
 def week_start(today=None):
     today = today or datetime.now(timezone.utc).date()
     return today - timedelta(days=today.weekday())
+
+
+def topics_for_week(week):
+    """This week's two Lifestyle topics: fitness + yoga one week, beauty + pets the next."""
+    half = (week.toordinal() // 7) % 2
+    return LIFESTYLE_TOPICS[half * 2: half * 2 + 2]
 
 
 def active_zip_counts(now=None):
@@ -210,19 +262,25 @@ def dispatch(context, now=None):
 
 
 # ---------------------------------------------------------------------------
-# Area run: ask Claude, check, save
+# Area run, places: ask Claude, check
 # ---------------------------------------------------------------------------
-def ask_claude(area_zip, avoid, today):
+def build_ask(area_zip, topics, avoid, today):
+    lines = [f"Today is {today:%A, %B %d, %Y}. Find top-rated places near ZIP {area_zip}:",
+             f"- eat: up to {EAT_PLACES} {EAT_WHAT} (at least {MIN_REVIEWS['eat']} reviews)"]
+    lines += [f"- {t}: up to {LIFESTYLE_PER_TOPIC} {what} (at least {MIN_REVIEWS['lifestyle']} reviews)"
+              for t, what in topics]
+    if avoid:
+        lines.append("These were shown recently, so pick different places: " + "; ".join(avoid[:40]))
+    return "\n".join(lines)
+
+
+def ask_claude(area_zip, topics, avoid, today):
     tools = [
         {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES},
         {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_FETCHES, "max_content_tokens": 8000},
         SAVE_TOOL,
     ]
-    ask = (f"Today is {today:%A, %B %d, %Y}. Find up to {MAX_FINDS} new or limited food finds "
-           f"this week near ZIP {area_zip}.")
-    if avoid:
-        ask += " These were shown last week, so skip them unless something about them is new: " + "; ".join(avoid[:20])
-    messages = [{"role": "user", "content": ask}]
+    messages = [{"role": "user", "content": build_ask(area_zip, topics, avoid, today)}]
     usage = {"input": 0, "output": 0, "searches": 0}
     for _ in range(6):  # pause_turn resumes
         res = _claude().messages.create(model=MODEL, max_tokens=16000, output_config={"effort": "medium"},
@@ -231,11 +289,11 @@ def ask_claude(area_zip, avoid, today):
         usage["output"] += res.usage.output_tokens or 0
         stu = getattr(res.usage, "server_tool_use", None)
         usage["searches"] += (getattr(stu, "web_search_requests", 0) or 0) if stu else 0
-        saved = next((b for b in res.content if b.type == "tool_use" and b.name == "save_finds"), None)
+        saved = next((b for b in res.content if b.type == "tool_use" and b.name == "save_places"), None)
         if saved:
-            return saved.input.get("finds") or [], usage
+            return saved.input.get("places") or [], usage
         if res.stop_reason != "pause_turn":
-            logger.warning("Area %s: no finds saved (stop_reason=%s)", area_zip, res.stop_reason)
+            logger.warning("Area %s: no places saved (stop_reason=%s)", area_zip, res.stop_reason)
             return [], usage
         messages.append({"role": "assistant", "content": res.content})
     return [], usage
@@ -259,66 +317,189 @@ def _specific_https(url):
     return host[4:] if host.startswith("www.") else host
 
 
-def check_finds(finds, today, avoid_keys=()):
-    """Keep the finds that pass every check, best first, at most MAX_FINDS."""
-    kept, per_source, seen = [], {}, set(avoid_keys)
-    for f in finds if isinstance(finds, list) else []:
-        if not isinstance(f, dict) or f.get("confidence") not in ("high", "medium"):
+def place_key(name):
+    """'Joe's Café & Bar' -> 'joes cafe bar': how a place is recognised from week to week."""
+    import unicodedata
+    plain = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode().lower()
+    return " ".join(re.sub(r"[^a-z0-9 ]+", " ", plain.replace("'", "")).split())[:80]
+
+
+def maps_url(name, address):
+    """A plain Google Maps search link (no API, no key)."""
+    q = ", ".join(x for x in (name, address) if x)
+    return "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(q)
+
+
+def _rating(value):
+    try:
+        r = round(float(value), 1)
+    except (TypeError, ValueError):
+        return None
+    return r if MIN_RATING <= r <= 5.0 else None
+
+
+def check_places(places, topics, recent=(), today=None):
+    """Keep the places that pass every check, in Claude's order, within each topic's cap."""
+    caps = {"eat": EAT_PLACES, **{t: LIFESTYLE_PER_TOPIC for t, _ in topics}}
+    kept, per_topic, per_source, seen = [], {}, {}, set(recent)
+    for p in places if isinstance(places, list) else []:
+        if not isinstance(p, dict) or p.get("confidence") not in ("high", "medium"):
             continue
-        site = _specific_https(f.get("source_url"))
+        topic = p.get("topic")
+        if topic not in caps or per_topic.get(topic, 0) >= caps[topic]:
+            continue
+        category = "eat" if topic == "eat" else "lifestyle"
+        rating = _rating(p.get("rating"))
+        try:
+            count = int(p.get("rating_count"))
+        except (TypeError, ValueError):
+            continue
+        if rating is None or count < MIN_REVIEWS[category]:
+            continue
+        site = _specific_https(p.get("source_url"))
         if not site:
             continue
-        try:
-            src_date = date.fromisoformat(str(f.get("source_date")))
-        except ValueError:
+        row = {k: _clean(p.get(k), n) for k, n in LIMITS.items()}
+        if not row["name"] or any(content_filter.text_is_blocked(v) for v in row.values()):
             continue
-        if not (today - timedelta(days=MAX_SOURCE_AGE_DAYS) <= src_date <= today + timedelta(days=1)):
-            continue
-        row = {k: _clean(f.get(k), n) for k, n in LIMITS.items()}
-        if not row["headline"] or not row["place"]:
-            continue
-        if any(content_filter.text_is_blocked(v) for v in row.values()):
-            continue
-        key = f"{row['place'].lower()}|{row['headline'].lower()}"
-        url = str(f["source_url"]).strip()
-        if key in seen or per_source.get(url, 0) >= MAX_PER_SOURCE:
+        key = place_key(row["name"])
+        url = str(p["source_url"]).strip()
+        if not key or key in seen or per_source.get(url, 0) >= MAX_PER_SOURCE:
             continue
         seen.add(key)
         per_source[url] = per_source.get(url, 0) + 1
-        kept.append({**row, "sourceUrl": url, "sourceSite": site, "sourceDate": src_date.isoformat(), "key": key})
-        if len(kept) >= MAX_FINDS:
+        per_topic[topic] = per_topic.get(topic, 0) + 1
+        kept.append({**row, "topic": topic, "category": category, "rating": rating, "ratingCount": count,
+                     "sourceUrl": url, "sourceSite": site, "key": key})
+    order = ["eat"] + [t for t, _ in topics]
+    return sorted(kept, key=lambda k: order.index(k["topic"]))  # stable: Claude's order within a topic
+
+
+def place_row(p, today):
+    """The saved card for a place, with the 1.7 fields filled in for older app builds."""
+    site = p["rating_site"] or p["sourceSite"]
+    rated = f"Rated {p['rating']} on {site} ({p['ratingCount']:,} reviews)"
+    return {"category": p["category"], "topic": p["topic"], "kind": "place",
+            "headline": f"⭐ {p['rating']} · {p['place_type'] or 'Local favourite'}",
+            "place": p["name"], "addressOrArea": p["address_or_area"], "what": p["what"], "when": "",
+            "whyNew": rated, "sourceUrl": p["sourceUrl"], "sourceSite": p["sourceSite"],
+            "sourceDate": today.isoformat(), "placeType": p["place_type"], "rating": Decimal(str(p["rating"])),
+            "ratingCount": p["ratingCount"], "ratingSite": site,
+            "mapsUrl": maps_url(p["name"], p["address_or_area"]), "findKey": p["key"]}
+
+
+# ---------------------------------------------------------------------------
+# Area run, events: Ticketmaster
+# ---------------------------------------------------------------------------
+def fetch_events(area_zip, now):
+    """Raw Ticketmaster events (music, arts & theatre) within AREA_MILES over the next EVENT_DAYS days."""
+    key = _ticketmaster_key()
+    centre = helpers._zip_centroids().get(area_zip)
+    if not key or not centre:
+        return []
+    params = {
+        "apikey": key, "latlong": f"{centre[0]:.4f},{centre[1]:.4f}", "radius": str(AREA_MILES), "unit": "miles",
+        "startDateTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "endDateTime": (now + timedelta(days=EVENT_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "classificationName": "music,arts & theatre", "sort": "date,asc", "size": "100", "locale": "*",
+    }
+    req = urllib.request.Request(f"{TM_URL}?{urllib.parse.urlencode(params)}", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as res:
+            body = json.load(res)
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        logger.warning("Ticketmaster request for %s failed: %s", area_zip, type(e).__name__)
+        return []
+    return ((body or {}).get("_embedded") or {}).get("events") or []
+
+
+def _event_when(start):
+    try:
+        d = datetime.strptime(start.get("localDate", ""), "%Y-%m-%d")
+    except ValueError:
+        return None, ""
+    when = f"{d:%a, %b} {d.day}"
+    if start.get("localTime") and not start.get("timeTBA"):
+        try:
+            t = datetime.strptime(start["localTime"][:5], "%H:%M")
+            when += " · " + t.strftime("%I:%M %p").lstrip("0")
+        except ValueError:
+            pass
+    return d.date(), when
+
+
+def pick_events(raw, recent=(), today=None):
+    """Up to MAX_EVENTS cards: one per show name and per venue, soonest first, filtered."""
+    cards, names, venues = [], set(recent), set()
+    for e in raw if isinstance(raw, list) else []:
+        if not isinstance(e, dict) or (e.get("dates") or {}).get("status", {}).get("code") in ("cancelled", "offsale"):
+            continue
+        name = _clean(e.get("name"), 100)
+        url = str(e.get("url") or "")
+        venue = (((e.get("_embedded") or {}).get("venues") or [{}])[0]) or {}
+        venue_name = _clean(venue.get("name"), 100)
+        day, when = _event_when((e.get("dates") or {}).get("start") or {})
+        if not name or not day or not _specific_https(url):
+            continue
+        key = place_key(name)
+        if not key or key in names or (venue_name and venue_name in venues):
+            continue
+        cls = (e.get("classifications") or [{}])[0] or {}
+        kind = " · ".join(x for x in (_clean((cls.get("segment") or {}).get("name"), 30),
+                                       _clean((cls.get("genre") or {}).get("name"), 30)) if x and x != "Undefined")
+        town = ", ".join(x for x in (_clean((venue.get("city") or {}).get("name"), 60),
+                                     _clean((venue.get("state") or {}).get("stateCode"), 4)) if x)
+        address = ", ".join(x for x in (_clean((venue.get("address") or {}).get("line1"), 100), town) if x)
+        if any(content_filter.text_is_blocked(v) for v in (name, venue_name, kind)):
+            continue
+        names.add(key)
+        if venue_name:
+            venues.add(venue_name)
+        local_time = (((e.get("dates") or {}).get("start") or {}).get("localTime") or "")[:5]
+        cards.append({"category": "lifestyle", "topic": "events", "kind": "event",
+                      "headline": name, "place": venue_name or town, "addressOrArea": address or town,
+                      "what": kind or "Live event", "when": when, "whyNew": "Coming up this week",
+                      "sourceUrl": url, "sourceSite": "ticketmaster.com",
+                      "sourceDate": (today or day).isoformat(), "eventDate": day.isoformat(),
+                      "eventTime": local_time, "ticketUrl": url,
+                      "mapsUrl": maps_url(venue_name, address or town), "findKey": key})
+        if len(cards) >= MAX_EVENTS:
             break
-    return kept
+    return cards
 
 
-def save_area(area_zip, members, finds, week, now_ts):
-    """Replace this week's finds for the area and record what was shown."""
+# ---------------------------------------------------------------------------
+# Area run: save
+# ---------------------------------------------------------------------------
+def recent_keys(previous, now_ts):
+    """Place keys shown in the last SKIP_DAYS days (from the area row's shownPlaces map)."""
+    shown = previous.get("shownPlaces") or {}
+    return {k: int(v) for k, v in shown.items() if int(v) >= now_ts - SKIP_DAYS * 86400}
+
+
+def save_area(area_zip, members, cards, week, now_ts, shown):
+    """Replace this week's cards for the area and record which places were shown."""
     week_id = int(week.strftime("%Y%m%d")) * 100
     old = helpers.query_all(discovered, KeyConditionExpression=Key("areaZip").eq(area_zip)
                             & Key("ID").between(week_id, week_id + 99)).get("Items", [])
     expires = now_ts + EXPIRE_DAYS * 86400
-    new_ids = {week_id + n for n in range(1, len(finds) + 1)}
+    created = datetime.fromtimestamp(now_ts, timezone.utc).isoformat()
+    new_ids = {week_id + n for n in range(1, len(cards) + 1)}
     with discovered.batch_writer() as batch:
         for item in old:  # leftovers from an earlier run this week (never a key rewritten below)
             if int(item["ID"]) not in new_ids:
                 batch.delete_item(Key={"areaZip": area_zip, "ID": item["ID"]})
-        for n, f in enumerate(finds, 1):
+        for n, c in enumerate(cards, 1):
             batch.put_item(Item={"areaZip": area_zip, "ID": week_id + n, "weekOf": week.isoformat(),
-                                 "createdAt": datetime.fromtimestamp(now_ts, timezone.utc).isoformat(),
-                                 "expiresAt": expires, "findKey": f["key"],
-                                 "headline": f["headline"], "place": f["place"],
-                                 "addressOrArea": f["address_or_area"], "what": f["what"], "when": f["when"],
-                                 "whyNew": f["why_new"], "sourceUrl": f["sourceUrl"],
-                                 "sourceSite": f["sourceSite"], "sourceDate": f["sourceDate"]})
+                                 "createdAt": created, "expiresAt": expires, **c})
     # The area row is updated, not replaced, so lastViewedAt (set by GET /discovered) survives.
     discovered.update_item(
         Key={"areaZip": area_zip, "ID": AREA_ROW},
-        UpdateExpression="SET zips = :z, weekOf = :w, #c = :c, shownKeys = :k, updatedAt = :t, "
-                         "expiresAt = if_not_exists(expiresAt, :e) REMOVE pending",
+        UpdateExpression="SET zips = :z, weekOf = :w, #c = :c, shownPlaces = :k, updatedAt = :t, "
+                         "expiresAt = if_not_exists(expiresAt, :e) REMOVE pending, shownKeys",
         ExpressionAttributeNames={"#c": "count"},
-        ExpressionAttributeValues={":z": members or [area_zip], ":w": week.isoformat(), ":c": len(finds),
-                                   ":k": [f["key"] for f in finds], ":t": now_ts,
-                                   ":e": now_ts + VIEWED_DAYS * 86400})
+        ExpressionAttributeValues={":z": members or [area_zip], ":w": week.isoformat(), ":c": len(cards),
+                                   ":k": shown, ":t": now_ts, ":e": now_ts + VIEWED_DAYS * 86400})
 
 
 def run_area(event, now=None):
@@ -329,14 +510,25 @@ def run_area(event, now=None):
         return {"saved": 0}
     members = [z for z in (helpers._norm_zip(x) for x in event.get("zips") or []) if z][:2000]
     previous = discovered.get_item(Key={"areaZip": area_zip, "ID": AREA_ROW}).get("Item") or {}
-    avoid_keys = list(previous.get("shownKeys") or [])
-    today = now.date()
-    raw, usage = ask_claude(area_zip, [k.replace("|", ": ") for k in avoid_keys], today)
-    finds = check_finds(raw, today, avoid_keys)
-    save_area(area_zip, members or previous.get("zips"), finds, week_start(today), int(now.timestamp()))
-    logger.info("Discover area %s: %d of %d find(s) kept; %d searches, %d in / %d out tokens",
-                area_zip, len(finds), len(raw), usage["searches"], usage["input"], usage["output"])
-    return {"saved": len(finds)}
+    now_ts, today = int(now.timestamp()), now.date()
+    week = week_start(today)
+    shown = recent_keys(previous, now_ts)
+    # A re-run in the same week may pick this week's places again.
+    this_week = {k for k, v in shown.items() if v >= int(datetime.combine(week, datetime.min.time(), timezone.utc).timestamp())}
+    recent = set(shown) - this_week
+
+    events = pick_events(fetch_events(area_zip, now), today=today)
+    topics = topics_for_week(week)
+    avoid = sorted(recent)
+    raw, usage = ask_claude(area_zip, topics, avoid, today)
+    places = [place_row(p, today) for p in check_places(raw, topics, recent, today)]
+    cards = places + events
+    for c in places:
+        shown[c["findKey"]] = now_ts
+    save_area(area_zip, members or previous.get("zips"), cards, week, now_ts, shown)
+    logger.info("Discover area %s: %d of %d place(s) kept, %d event(s); %d searches, %d in / %d out tokens",
+                area_zip, len(places), len(raw), len(events), usage["searches"], usage["input"], usage["output"])
+    return {"saved": len(cards)}
 
 
 def lambda_handler(event, context):

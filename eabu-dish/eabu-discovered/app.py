@@ -1,4 +1,4 @@
-"""GET /discovered?zip=12345 - this week's "Discovered near you" food finds for the caller's area.
+"""GET /discovered?zip=12345[&v=2] - this week's "Discovered near you" cards for the caller's area.
 
 Signed in only. The area is one whose member ZIPs include ?zip or whose centre is within
 AREA_MILES, preferring one with current finds, then the nearest. Finds come from the weekly
@@ -9,8 +9,13 @@ first search starts at once (cards appear a minute or two later); at most NEW_AR
 a day (UTC), beyond that it waits for Monday. Viewing an area marks it (lastViewedAt, at most
 once a day) so the Monday run keeps searching it; unviewed areas drop out after 28 days.
 
-Response: {"areaZip", "weekOf", "pending", "Items": [{ID, areaZip, headline, place, addressOrArea,
-           what, when, whyNew, sourceUrl, sourceSite, sourceDate}], "Count"}
+Cards are top-rated places (category eat or lifestyle) and Ticketmaster events (lifestyle,
+kind event; hidden once their day has passed, US Eastern). Without ?v=2 (app 1.7) only eat places
+and the older news finds come back, since that build only knows food cards.
+
+Response: {"areaZip", "weekOf", "pending", "Items": [{ID, areaZip, category, topic, kind, headline,
+           place, addressOrArea, what, when, whyNew, sourceUrl, sourceSite, sourceDate, placeType,
+           rating, ratingCount, ratingSite, mapsUrl, eventDate, eventTime, ticketUrl}], "Count"}
 """
 import json
 import logging
@@ -40,8 +45,9 @@ NEW_AREAS_PER_DAY = int(os.environ.get("DISCOVER_NEW_AREAS_PER_DAY", "20"))
 VIEWED_DAYS = 28
 DAY = 86400
 CACHE_SECONDS = 600  # the table changes once a week
-FIELDS = ("ID", "areaZip", "headline", "place", "addressOrArea", "what", "when", "whyNew",
-          "sourceUrl", "sourceSite", "sourceDate")
+FIELDS = ("ID", "areaZip", "category", "topic", "kind", "headline", "place", "addressOrArea", "what",
+          "when", "whyNew", "sourceUrl", "sourceSite", "sourceDate", "placeType", "rating", "ratingCount",
+          "ratingSite", "mapsUrl", "eventDate", "eventTime", "ticketUrl")
 _cache = None  # (time loaded, {areaZip: area row}, {areaZip: [finds]})
 
 
@@ -69,6 +75,25 @@ def _load(force=False):
 
 def _live(rows, now):
     return [f for f in rows or [] if int(f.get("expiresAt") or 0) > now]
+
+
+def _today_eastern(now):
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(now, ZoneInfo(helpers.POST_LIMIT_TIMEZONE)).date().isoformat()
+
+
+def for_client(items, version, now):
+    """What this app build can show: v2 gets every card except past events; older builds get food
+    places only (rows without a category are the older news finds, which are food too)."""
+    today = _today_eastern(now)
+    out = []
+    for f in items:
+        if f.get("kind") == "event" and str(f.get("eventDate") or "") < today:
+            continue
+        if version < 2 and (f.get("category") not in (None, "eat") or f.get("kind") == "event"):
+            continue
+        out.append(f)
+    return out
 
 
 def area_for(zip_code, areas, finds=None, now=0):
@@ -171,7 +196,12 @@ def lambda_handler(event, context):
     denied = helpers.require_authenticated(event)
     if denied:
         return denied
-    zip_code = ((event.get("queryStringParameters") or {}).get("zip") or "").strip()
+    params = event.get("queryStringParameters") or {}
+    zip_code = (params.get("zip") or "").strip()
+    try:
+        version = int(params.get("v") or 1)
+    except ValueError:
+        version = 1
     if not helpers._norm_zip(zip_code):
         return helpers._response(400, {"msg": "A 5-digit zip is required"})
     try:
@@ -203,7 +233,8 @@ def lambda_handler(event, context):
     if items:  # newest week only, in the order Claude ranked them
         latest = max(int(f["ID"]) // 100 for f in items)
         items = sorted((f for f in items if int(f["ID"]) // 100 == latest), key=lambda f: int(f["ID"]))
-    out = [{k: (str(f[k]) if k == "ID" else f.get(k, "")) for k in FIELDS} for f in items]
+        items = for_client(items, version, now)
+    out = [{k: str(f.get(k, "")) for k in FIELDS} for f in items]
     pending = bool(centre and not items and (areas.get(centre) or {}).get("pending"))
     return helpers._response(200, {"areaZip": centre, "weekOf": items[0].get("weekOf") if items else None,
                                    "pending": pending, "Items": out, "Count": len(out)})

@@ -1336,7 +1336,7 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:ses:${Region}:${AWS::AccountId}:identity/*@*'
 
 
-  # Mondays: web-searches new food finds per area with Claude (one async run per area).
+  # Mondays: top-rated places per area with Claude + Ticketmaster events (one async run per area).
   EabuDiscoverFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1354,7 +1354,7 @@ Resources:
           Type: ScheduleV2
           Properties:
             ScheduleExpression: cron(0 10 ? * MON *)   # 10:00 UTC Monday = 5 or 6 am US Eastern
-            Description: Discovered near you (weekly food finds)
+            Description: Discovered near you (weekly top-rated places and events)
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -1381,11 +1381,12 @@ Resources:
                 - dynamodb:BatchWriteItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${DiscoveredTableName}'
-            - Effect: Allow   # the Claude API key (SecureString, AWS-managed key)
+            - Effect: Allow   # the Claude and Ticketmaster API keys (SecureString, AWS-managed key)
               Action:
                 - ssm:GetParameter
               Resource:
                 - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/anthropic-api-key'
+                - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/ticketmaster-api-key'
             - Effect: Allow   # starts itself once per area
               Action:
                 - lambda:InvokeFunction

@@ -1,6 +1,7 @@
 """Weekly "Discovered near you": areas, checks on Claude's finds, saving, and GET /discovered."""
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 import boto3
@@ -21,20 +22,19 @@ def enforce(monkeypatch):
     monkeypatch.setenv("AUTH_USER_ID_CLAIM", "sub")
 
 
-def find(**over):
-    f = {"headline": "Breakfast tacos land in Ardmore", "place": "Taco Heart", "address_or_area": "Ardmore, PA",
-         "what": "Austin-style breakfast tacos.", "when": "Mon-Sat 8-6", "why_new": "Soft opening",
-         "source_url": "https://delco.today/2026/11/new-restaurants/", "source_date": "2026-11-20",
-         "confidence": "high"}
-    f.update(over)
-    return f
+def place(**over):
+    p = {"topic": "eat", "name": "Taco Heart", "place_type": "Taqueria", "address_or_area": "12 Lancaster Ave, Ardmore, PA",
+         "what": "Austin-style breakfast tacos people drive across town for.", "rating": 4.6, "rating_count": 812,
+         "rating_site": "Yelp", "source_url": "https://www.yelp.com/biz/taco-heart-ardmore", "confidence": "high"}
+    p.update(over)
+    return p
 
 
 class FakeClaude:
-    """messages.create returns a save_finds call (optionally after a paused turn)."""
+    """messages.create returns a save_places call (optionally after a paused turn)."""
 
-    def __init__(self, finds, pause_first=False):
-        self.finds, self.pause_first, self.calls = finds, pause_first, []
+    def __init__(self, places, pause_first=False):
+        self.places, self.pause_first, self.calls = places, pause_first, []
         self.messages = self
 
     def create(self, **kwargs):
@@ -43,8 +43,18 @@ class FakeClaude:
                                 server_tool_use=SimpleNamespace(web_search_requests=3))
         if self.pause_first and len(self.calls) == 1:
             return SimpleNamespace(content=[SimpleNamespace(type="text", text="...")], stop_reason="pause_turn", usage=usage)
-        block = SimpleNamespace(type="tool_use", name="save_finds", input={"finds": self.finds, "notes": ""})
+        block = SimpleNamespace(type="tool_use", name="save_places", input={"places": self.places, "notes": ""})
         return SimpleNamespace(content=[block], stop_reason="tool_use", usage=usage)
+
+
+def tm_event(name="Jazz Night", venue="The Keswick Theatre", day="2026-11-27", time="20:00", **over):
+    e = {"name": name, "url": f"https://www.ticketmaster.com/{name.lower().replace(' ', '-')}/event/1",
+         "dates": {"start": {"localDate": day, "localTime": time}, "status": {"code": "onsale"}},
+         "classifications": [{"segment": {"name": "Music"}, "genre": {"name": "Jazz"}}],
+         "_embedded": {"venues": [{"name": venue, "city": {"name": "Glenside"}, "state": {"stateCode": "PA"},
+                                   "address": {"line1": "291 N Keswick Ave"}}]}}
+    e.update(over)
+    return e
 
 
 def make_discovered():
@@ -65,22 +75,73 @@ def test_areas_group_nearby_zips_busiest_first():
     assert fn.group_areas({"19060": 5, "10003": 3}, max_areas=1) == [("19060", ["19060"], 5)]
 
 
-def test_checks_drop_weak_old_homepage_and_repeated_finds():
+def test_checks_keep_only_well_rated_new_places_within_each_topics_cap():
     fn = load("eabu-discover")
-    kept = fn.check_finds([
-        find(),
-        find(place="Old Spot", source_date="2026-10-01"),                     # too old
-        find(place="No Date", source_date="unknown"),
-        find(place="Home Page", source_url="https://delco.today/"),           # homepage
-        find(place="Plain Http", source_url="http://example.com/a"),
-        find(place="Unsure", confidence="low"),
-        find(place="Shown Before", headline="Same headline"),
-        find(place="Second From Article", headline="Two"),
-        find(place="Third From Article", headline="Three"),                   # 3rd from one URL
-        find(place="Rude", what="p0rn night"),                                # content filter
-    ], TODAY, avoid_keys={"shown before|same headline"})
-    assert [k["place"] for k in kept] == ["Taco Heart", "Second From Article"]
-    assert kept[0]["sourceSite"] == "delco.today" and kept[0]["sourceDate"] == "2026-11-20"
+    topics = fn.topics_for_week(TODAY)
+    assert [t for t, _ in topics] in (["fitness", "yoga"], ["beauty", "pets"])
+    other = "pets" if topics[0][0] == "fitness" else "yoga"
+    t1 = topics[0][0]
+    kept = fn.check_places([
+        place(),
+        place(name="Low Stars", rating=3.9),
+        place(name="Few Reviews", rating_count=12),                            # eat needs 50
+        place(name="Home Page", source_url="https://www.yelp.com/"),
+        place(name="Plain Http", source_url="http://example.com/biz/a"),
+        place(name="Unsure", confidence="low"),
+        place(name="Shown Lately"),
+        place(name="Taco  Heart!"),                                            # same place twice
+        place(name="Rude", what="p0rn night"),                                 # content filter
+        place(name="Off Topic", topic=other),                                  # not this week's topic
+        place(name="Small Studio", topic=t1, rating=4.8, rating_count=20,
+              source_url="https://www.yelp.com/biz/small-studio"),            # lifestyle needs 15
+        place(name="Second", topic=t1, source_url="https://www.yelp.com/biz/second"),
+        place(name="Third", topic=t1, source_url="https://www.yelp.com/biz/third"),   # topic cap is 2
+        place(name="Cafe B", source_url="https://www.yelp.com/biz/b"),
+        place(name="Cafe C", source_url="https://www.yelp.com/biz/c"),
+        place(name="Cafe D", source_url="https://www.yelp.com/biz/d"),
+        place(name="Cafe E", source_url="https://www.yelp.com/biz/e"),          # eat cap is 4
+    ], topics, recent={"shown lately"})
+    assert [k["name"] for k in kept] == ["Taco Heart", "Cafe B", "Cafe C", "Cafe D", "Small Studio", "Second"]
+    assert kept[0]["category"] == "eat" and kept[4]["category"] == "lifestyle"
+    assert kept[0]["sourceSite"] == "yelp.com" and kept[0]["rating"] == 4.6
+
+
+def test_lifestyle_topics_alternate_weekly():
+    fn = load("eabu-discover")
+    from datetime import timedelta
+    a, b = fn.topics_for_week(TODAY), fn.topics_for_week(TODAY + timedelta(days=7))
+    assert {t for t, _ in a} | {t for t, _ in b} == {"fitness", "yoga", "beauty", "pets"}
+    assert fn.topics_for_week(TODAY + timedelta(days=14)) == a
+
+
+def test_place_card_keeps_the_fields_older_builds_show():
+    fn = load("eabu-discover")
+    [p] = fn.check_places([place()], fn.topics_for_week(TODAY))
+    row = fn.place_row(p, TODAY)
+    assert row["headline"] == "⭐ 4.6 · Taqueria" and row["place"] == "Taco Heart"
+    assert row["whyNew"] == "Rated 4.6 on Yelp (812 reviews)" and row["sourceDate"] == "2026-11-23"
+    assert row["mapsUrl"] == ("https://www.google.com/maps/search/?api=1&query="
+                              "Taco%20Heart%2C%2012%20Lancaster%20Ave%2C%20Ardmore%2C%20PA")
+    assert row["kind"] == "place" and row["category"] == "eat" and str(row["rating"]) == "4.6"
+
+
+def test_events_one_per_show_and_venue_soonest_first():
+    fn = load("eabu-discover")
+    cards = fn.pick_events([
+        tm_event(),
+        tm_event(day="2026-11-28"),                                            # same show again
+        tm_event(name="Other Act"),                                            # same venue
+        tm_event(name="Cancelled Show", venue="Hall A", dates={"start": {"localDate": "2026-11-27"},
+                                                               "status": {"code": "cancelled"}}),
+        tm_event(name="No Link", venue="Hall B", url="http://x"),
+        tm_event(name="Nutcracker", venue="Academy of Music", time="14:00",
+                 classifications=[{"segment": {"name": "Arts & Theatre"}, "genre": {"name": "Ballet"}}]),
+    ], today=TODAY)
+    assert [c["headline"] for c in cards] == ["Jazz Night", "Nutcracker"]
+    assert cards[0]["when"] == "Fri, Nov 27 · 8:00 PM" and cards[0]["what"] == "Music · Jazz"
+    assert cards[0]["eventDate"] == "2026-11-27" and cards[0]["ticketUrl"].startswith("https://www.ticketmaster.com/")
+    assert cards[0]["addressOrArea"] == "291 N Keswick Ave, Glenside, PA" and cards[1]["when"].endswith("2:00 PM")
+    assert all(c["kind"] == "event" and c["category"] == "lifestyle" for c in cards)
 
 
 @mock_aws
@@ -99,31 +160,53 @@ def test_dispatch_starts_one_run_per_area(monkeypatch):
 
 
 @mock_aws
-def test_area_run_saves_this_weeks_finds_and_remembers_them():
+def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     table = make_discovered()
     fn = load("eabu-discover")
-    fake = FakeClaude([find(), find(place="Capozzoli's", headline="New family kitchen",
-                                    source_url="https://cfood.org/818500/capozzoli/")], pause_first=True)
+    topic = fn.topics_for_week(TODAY)[0][0]
+    fake = FakeClaude([place(), place(name="Iron Barn", topic=topic, place_type="Gym",
+                                      source_url="https://www.yelp.com/biz/iron-barn")], pause_first=True)
     fn._client = fake
-    assert fn.run_area({"areaZip": "19060", "zips": ["19060", "19033"]}, now=NOW) == {"saved": 2}
+    monkeypatch.setattr(fn, "fetch_events", lambda z, now: [tm_event()])
+    assert fn.run_area({"areaZip": "19060", "zips": ["19060", "19033"]}, now=NOW) == {"saved": 3}
 
     rows = table.scan()["Items"]
     area = next(r for r in rows if r["ID"] == 0)
-    finds = sorted((r for r in rows if r["ID"] != 0), key=lambda r: r["ID"])
-    assert [int(r["ID"]) for r in finds] == [2026112301, 2026112302]
-    assert finds[0]["place"] == "Taco Heart" and finds[0]["weekOf"] == "2026-11-23"
-    assert int(finds[0]["expiresAt"]) == int(NOW.timestamp()) + 8 * 86400
-    assert area["zips"] == ["19060", "19033"] and len(area["shownKeys"]) == 2
-    assert "ZIP 19060" in fake.calls[0]["messages"][0]["content"] and len(fake.calls) == 2
+    cards = sorted((r for r in rows if r["ID"] != 0), key=lambda r: r["ID"])
+    assert [int(r["ID"]) for r in cards] == [2026112301, 2026112302, 2026112303]
+    assert [r["place"] for r in cards] == ["Taco Heart", "Iron Barn", "The Keswick Theatre"]
+    assert [r["category"] for r in cards] == ["eat", "lifestyle", "lifestyle"] and cards[2]["kind"] == "event"
+    assert int(cards[0]["expiresAt"]) == int(NOW.timestamp()) + 8 * 86400 and cards[0]["weekOf"] == "2026-11-23"
+    assert area["zips"] == ["19060", "19033"] and set(area["shownPlaces"]) == {"taco heart", "iron barn"}
+    ask = fake.calls[0]["messages"][0]["content"]
+    assert "ZIP 19060" in ask and "- eat: up to 4" in ask and f"- {topic}: up to 2" in ask and len(fake.calls) == 2
     assert fake.calls[0]["model"] == "claude-haiku-5-5"
 
-    # A re-run the same week replaces the week's finds and tells Claude what was shown.
-    fake2 = FakeClaude([find(place="New Place", headline="Fresh")])
-    fn._client = fake2
+    # A re-run the same week replaces the week's cards (and may show this week's places again).
+    fn._client = FakeClaude([place()])
+    monkeypatch.setattr(fn, "fetch_events", lambda z, now: [])
     fn.run_area({"areaZip": "19060"}, now=NOW)
-    left = [r for r in table.scan()["Items"] if r["ID"] != 0]
-    assert [r["place"] for r in left] == ["New Place"]
-    assert "taco heart: breakfast tacos land in ardmore" in fake2.calls[0]["messages"][0]["content"]
+    assert [r["place"] for r in table.scan()["Items"] if r["ID"] != 0] == ["Taco Heart"]
+
+    # Next week Claude is told what was shown, and a repeat is dropped anyway.
+    from datetime import timedelta
+    fake3 = FakeClaude([place(), place(name="New Diner", source_url="https://www.yelp.com/biz/new-diner")])
+    fn._client = fake3
+    fn.run_area({"areaZip": "19060"}, now=NOW + timedelta(days=7))
+    assert "taco heart" in fake3.calls[0]["messages"][0]["content"]
+    week2 = [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261130]
+    assert week2 == ["New Diner"]
+
+    # Five weeks later Taco Heart may come back.
+    fn._client = FakeClaude([place()])
+    fn.run_area({"areaZip": "19060"}, now=NOW + timedelta(days=35))
+    assert [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261228] == ["Taco Heart"]
+
+
+def test_ticketmaster_is_skipped_without_a_key(monkeypatch):
+    fn = load("eabu-discover")
+    monkeypatch.setattr(fn, "_tm_key", "")
+    assert fn.fetch_events("19060", NOW) == []
 
 
 @mock_aws
@@ -136,20 +219,31 @@ def test_get_discovered_returns_the_callers_area():
     table.put_item(Item={"areaZip": "19060", "ID": 2026112301, "headline": "First", "expiresAt": future, "weekOf": "2026-11-23",
                          "sourceUrl": "https://a.com/x", "place": "P"})
     table.put_item(Item={"areaZip": "19060", "ID": 2026112303, "headline": "Expired", "expiresAt": 5, "weekOf": "2026-11-23"})
+    table.put_item(Item={"areaZip": "19060", "ID": 2026112304, "headline": "Gym", "expiresAt": future, "weekOf": "2026-11-23",
+                         "category": "lifestyle", "kind": "place", "rating": Decimal("4.7"), "ratingCount": 120})
+    table.put_item(Item={"areaZip": "19060", "ID": 2026112305, "headline": "Concert", "expiresAt": future, "weekOf": "2026-11-23",
+                         "category": "lifestyle", "kind": "event", "eventDate": "2099-01-01"})
+    table.put_item(Item={"areaZip": "19060", "ID": 2026112306, "headline": "Past show", "expiresAt": future, "weekOf": "2026-11-23",
+                         "category": "lifestyle", "kind": "event", "eventDate": "2020-01-01"})
+    table.put_item(Item={"areaZip": "19060", "ID": 2026112307, "headline": "Diner", "expiresAt": future, "weekOf": "2026-11-23",
+                         "category": "eat", "kind": "place"})
     fn = load("eabu-discovered")
     fn._cache = None
     started = []
     fn.lambda_client = SimpleNamespace(invoke=lambda **kw: started.append(json.loads(kw["Payload"])))
 
-    def get(zip_code, user="viewer"):
-        event = {"httpMethod": "GET", "queryStringParameters": {"zip": zip_code}}
+    def get(zip_code, user="viewer", v=None):
+        event = {"httpMethod": "GET", "queryStringParameters": {"zip": zip_code, **({"v": v} if v else {})}}
         if user:
             event["requestContext"] = {"authorizer": {"claims": {"sub": user}}}
         res = fn.lambda_handler(event, None)
         return res["statusCode"], json.loads(res["body"])
 
-    status, body = get("19033")           # a member ZIP
-    assert status == 200 and [i["headline"] for i in body["Items"]] == ["First", "Second"]
+    status, body = get("19033")           # a member ZIP; app 1.7 gets food only
+    assert status == 200 and [i["headline"] for i in body["Items"]] == ["First", "Second", "Diner"]
+    v2 = get("19033", v="2")[1]["Items"]   # 1.8: places + upcoming events, never a past one
+    assert [i["headline"] for i in v2] == ["First", "Second", "Gym", "Concert", "Diner"]
+    assert v2[2]["rating"] == "4.7" and v2[2]["ratingCount"] == "120" and v2[0]["category"] == ""
     assert body["areaZip"] == "19060" and body["weekOf"] == "2026-11-23" and body["Items"][0]["ID"] == "2026112301"
     assert get("19063")[1]["areaZip"] == "19060"     # Media: not a member, but within 25 miles
     assert body["pending"] is False
