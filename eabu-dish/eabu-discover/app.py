@@ -95,6 +95,19 @@ LIFESTYLE_TOPICS = [
 EAT_WHAT = ("restaurants of different cuisines (sit-down or takeout), with at most one cafe, bakery "
             "or dessert shop")
 
+# The app's built-in stock photo for a card, by topic. Claude picks one per place; anything else is
+# dropped and the app guesses from place_type. Keep in step with the app's components/stockPhotos.js.
+PHOTO_KEYS = {
+    "eat": ["italian", "indian", "chinese", "mexican", "japanese", "thai", "vietnamese", "korean",
+            "mediterranean", "middle_eastern", "american", "bbq", "seafood", "french", "caribbean",
+            "southern", "pizza", "cafe", "bakery", "dessert", "breakfast", "deli", "vegan", "restaurant"],
+    "fitness": ["gym", "yoga", "boxing", "cycling", "swim"],
+    "yoga": ["yoga", "gym"],
+    "beauty": ["salon", "barber", "nails", "spa"],
+    "pets": ["vet", "groomer", "pet"],
+}
+ALL_PHOTO_KEYS = sorted({k for keys in PHOTO_KEYS.values() for k in keys})
+
 SAVE_TOOL = {
     "name": "save_places",
     "description": "Save the final list of top-rated places. Call this exactly once, after searching.",
@@ -116,9 +129,13 @@ SAVE_TOOL = {
                         "rating_count": {"type": "integer", "description": "Number of reviews shown with that rating"},
                         "rating_site": {"type": "string", "description": "Where the rating is from, e.g. 'Yelp', 'Tripadvisor', 'Google'"},
                         "source_url": {"type": "string", "description": "The page where you saw the rating"},
+                        "photo": {"type": "string", "enum": ALL_PHOTO_KEYS,
+                                  "description": "The closest picture for the card: for eat the cuisine or kind of place "
+                                                 "('restaurant' if none fits); fitness gym/yoga/boxing/cycling/swim; "
+                                                 "yoga yoga; beauty salon/barber/nails/spa; pets vet/groomer/pet"},
                         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                     },
-                    "required": ["topic", "name", "place_type", "address_or_area", "what", "rating",
+                    "required": ["topic", "name", "place_type", "photo", "address_or_area", "what", "rating",
                                  "rating_count", "rating_site", "source_url", "confidence"],
                     "additionalProperties": False,
                 },
@@ -417,7 +434,9 @@ def check_places(places, topics, recent=(), today=None):
         seen.add(key)
         per_source[url] = per_source.get(url, 0) + 1
         per_topic[topic] = per_topic.get(topic, 0) + 1
+        photo = p.get("photo") if p.get("photo") in PHOTO_KEYS.get(topic, ()) else ""
         kept.append({**row, "topic": topic, "category": category, "rating": rating, "ratingCount": count,
+                     "photo": photo,
                      "sourceUrl": url, "sourceSite": site, "key": key})
     order = ["eat"] + [t for t, _ in topics]
     return sorted(kept, key=lambda k: order.index(k["topic"]))  # stable: Claude's order within a topic
@@ -433,7 +452,8 @@ def place_row(p, today):
             "whyNew": rated, "sourceUrl": p["sourceUrl"], "sourceSite": p["sourceSite"],
             "sourceDate": today.isoformat(), "placeType": p["place_type"], "rating": Decimal(str(p["rating"])),
             "ratingCount": p["ratingCount"], "ratingSite": site,
-            "mapsUrl": maps_url(p["name"], p["address_or_area"]), "findKey": p["key"]}
+            "mapsUrl": maps_url(p["name"], p["address_or_area"]), "photo": p.get("photo", ""),
+            "findKey": p["key"]}
 
 
 # ---------------------------------------------------------------------------

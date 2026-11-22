@@ -17,7 +17,8 @@ Response: {"areaZip", "weekOf", "pending", "Items": [{ID, areaZip, category, top
            place, addressOrArea, what, when, whyNew, sourceUrl, sourceSite, sourceDate, placeType,
            rating, ratingCount, ratingSite, mapsUrl, eventDate, eventTime, ticketUrl, addressLat,
            addressLng (map pin; "" when the address couldn't be placed), imageUrl (Ticketmaster
-           event picture; "" for places, which the app shows as a map or topic thumbnail)}], "Count"}
+           event picture; "" for places), photo (key of the app's built-in stock photo for a place, e.g.
+           "indian", "vet"; "" when unknown)}], "Count"}
 """
 import json
 import logging
@@ -49,7 +50,7 @@ DAY = 86400
 CACHE_SECONDS = 600  # the table changes once a week
 FIELDS = ("ID", "areaZip", "category", "topic", "kind", "headline", "place", "addressOrArea", "what",
           "when", "whyNew", "sourceUrl", "sourceSite", "sourceDate", "placeType", "rating", "ratingCount",
-          "ratingSite", "mapsUrl", "eventDate", "eventTime", "ticketUrl", "addressLat", "addressLng", "imageUrl")
+          "ratingSite", "mapsUrl", "eventDate", "eventTime", "ticketUrl", "addressLat", "addressLng", "imageUrl", "photo")
 _cache = None  # (time loaded, {areaZip: area row}, {areaZip: [finds]})
 
 

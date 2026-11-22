@@ -25,7 +25,8 @@ def enforce(monkeypatch):
 def place(**over):
     p = {"topic": "eat", "name": "Taco Heart", "place_type": "Taqueria", "address_or_area": "12 Lancaster Ave, Ardmore, PA",
          "what": "Austin-style breakfast tacos people drive across town for.", "rating": 4.6, "rating_count": 812,
-         "rating_site": "Yelp", "source_url": "https://www.yelp.com/biz/taco-heart-ardmore", "confidence": "high"}
+         "rating_site": "Yelp", "source_url": "https://www.yelp.com/biz/taco-heart-ardmore", "photo": "mexican",
+         "confidence": "high"}
     p.update(over)
     return p
 
@@ -381,3 +382,18 @@ def test_event_picture_is_the_16_9_one_nearest_640px():
     [plain] = fn.pick_events([tm_event(images=[{"ratio": "16_9", "url": "http://x/a.jpg", "width": 640}])],
                              today=TODAY)
     assert plain["imageUrl"] == ""
+
+
+def test_place_photo_key_must_suit_its_topic():
+    fn = load("eabu-discover")
+    topics = [("pets", ""), ("beauty", "")]
+    kept = fn.check_places([
+        place(),                                                                       # eat, mexican
+        place(name="Paws Vet", topic="pets", photo="vet", source_url="https://www.yelp.com/biz/paws"),
+        place(name="Odd Salon", topic="beauty", photo="pizza", source_url="https://www.yelp.com/biz/odd"),
+        place(name="Old Data", topic="eat", photo=None, source_url="https://www.yelp.com/biz/old"),
+    ], topics)
+    assert {k["name"]: k["photo"] for k in kept} == {"Taco Heart": "mexican", "Paws Vet": "vet",
+                                                    "Odd Salon": "", "Old Data": ""}
+    assert fn.place_row(kept[0], TODAY)["photo"] == "mexican"
+    assert set(fn.ALL_PHOTO_KEYS) >= {"italian", "middle_eastern", "vet", "spa", "swim"}
