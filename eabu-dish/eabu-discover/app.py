@@ -75,7 +75,7 @@ EAT_PLACES = 4
 LIFESTYLE_PER_TOPIC = 2
 MAX_EVENTS = 4
 EVENT_DAYS = 7
-MIN_RATING = 4.0
+MIN_RATING = 3.0
 MIN_REVIEWS = {"eat": 50, "lifestyle": 15}   # small studios and vets have fewer reviews
 MAX_SEARCHES = 15
 MAX_FETCHES = 8
@@ -152,7 +152,7 @@ SYSTEM = """You pick top-rated local places for an app's "Discovered near you" f
 Search the public web for well-reviewed places near the given US ZIP code in the categories asked for.
 
 Rules:
-- Only places with a star rating of 4.0 or higher out of 5 AND a stated number of reviews, both of which
+- Only places with a star rating of 3.0 or higher out of 5 AND a stated number of reviews, both of which
   you actually saw on a page (Yelp, Tripadvisor, a review site, or a list page that shows them). Copy the
   rating and review count exactly. Never estimate, round up or guess a rating; if you can't see one, leave
   the place out.

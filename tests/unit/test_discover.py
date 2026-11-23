@@ -84,7 +84,7 @@ def test_checks_keep_only_well_rated_new_places_within_each_topics_cap():
     t1 = topics[0][0]
     kept = fn.check_places([
         place(),
-        place(name="Low Stars", rating=3.9),
+        place(name="Low Stars", rating=2.9),
         place(name="Few Reviews", rating_count=12),                            # eat needs 50
         place(name="Home Page", source_url="https://www.yelp.com/"),
         place(name="Plain Http", source_url="http://example.com/biz/a"),
