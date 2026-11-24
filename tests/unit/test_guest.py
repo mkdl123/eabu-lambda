@@ -104,3 +104,15 @@ def test_guests_are_rate_limited_per_ip(monkeypatch):
     codes = [fn.lambda_handler(guest("/guest/feed", {"zip": ZIP}), None)["statusCode"] for _ in range(3)]
     assert codes == [200, 200, 429]
     assert fn.lambda_handler(guest("/guest/feed", {"zip": ZIP}, ip="198.51.100.9"), None)["statusCode"] == 200
+
+
+def test_nearest_zip_from_position():
+    from my_utils import helpers
+    # Media, PA area and lower Manhattan
+    assert helpers.nearest_zip(39.92, -75.39) in {"19063", "19086", "19065"}
+    assert helpers.nearest_zip("40.7075", "-74.0113").startswith("10")
+    # At sea, outside the US, or junk
+    assert helpers.nearest_zip(30.0, -40.0) is None
+    assert helpers.nearest_zip(51.5, -0.12) is None
+    assert helpers.nearest_zip("x", None) is None
+    assert helpers.nearest_zip(95, 0) is None

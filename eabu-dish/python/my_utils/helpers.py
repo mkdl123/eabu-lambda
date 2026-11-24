@@ -815,6 +815,34 @@ def zip_distance_miles(zip_a, zip_b):
     return 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
 
 
+NEAREST_ZIP_MAX_MILES = 30
+
+
+def nearest_zip(lat, lon, max_miles=NEAREST_ZIP_MAX_MILES):
+    """The US ZIP whose Census centroid is closest to (lat, lon), or None if none is within
+    max_miles (outside the US, at sea). Turns a phone's position into a ZIP without any
+    outside service. Nearest centroid, so near a boundary it can pick the neighbouring ZIP,
+    which doesn't matter for a 50-mile feed."""
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    # Cheap equirectangular distance for the scan; exact enough at these ranges.
+    cos_lat = math.cos(math.radians(lat))
+    best, best_d2 = None, None
+    for z, (zlat, zlon) in _zip_centroids().items():
+        dy = zlat - lat
+        dx = (zlon - lon) * cos_lat
+        d2 = dx * dx + dy * dy
+        if best_d2 is None or d2 < best_d2:
+            best, best_d2 = z, d2
+    if best is None or math.sqrt(best_d2) * 69.05 > max_miles:
+        return None
+    return best
+
+
 def is_known_zip(zip_code):
     z = _norm_zip(zip_code)
     return bool(z) and z in _zip_centroids()

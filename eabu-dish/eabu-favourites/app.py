@@ -19,6 +19,8 @@ Either feed with ?map=1 returns only posts whose poster added an address with a 
 (addressLat/addressLng), unpaged (limit/cursor are ignored), up to MAP_MAX_POSTS: the Home
 screen's Map view shows them all at once.
 
+GET    /guest/zip?lat=&lng=   PUBLIC: the nearest US ZIP to a position (Use my location before
+                               sign-up), from the bundled Census centroids; nothing stored.
 GET    /guest/feed?zip=12345[&kind=seller|buyer]   PUBLIC (no sign-in): what a guest sees before
                                                    creating an account. Everyone's current posts of that
                                                    kind (default seller) within 50 miles, paged and ?map=1
@@ -368,6 +370,16 @@ def guest_feed(event):
     return _json(200, result)
 
 
+def guest_zip(event):
+    """GET /guest/zip?lat=&lng= (public): the ZIP for the phone's position, for "Use my location"
+    before sign-up. The position is never stored or logged."""
+    query = event.get("queryStringParameters") or {}
+    zip_code = helpers.nearest_zip(query.get("lat"), query.get("lng"))
+    if not zip_code:
+        return helpers._response(404, {"msg": "No US ZIP code near this location"})
+    return _json(200, {"zip": zip_code})
+
+
 @helpers.cors
 @helpers.rate_limited
 def lambda_handler(event, context):
@@ -378,6 +390,8 @@ def lambda_handler(event, context):
         if helpers.is_guest_route(event):  # public: only the guest feed, read-only
             if method == "GET" and resource == "/guest/feed":
                 return guest_feed(event)
+            if method == "GET" and resource == "/guest/zip":
+                return guest_zip(event)
             return helpers._response(404, {"msg": "Not found"})
         if method == "POST":
             return add_favourite(event)

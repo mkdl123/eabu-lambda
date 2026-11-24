@@ -67,6 +67,7 @@ ROUTES=(
   "GET /guest/feed EabuFavouritesFunction"
   "GET /guest/discovered EabuDiscoveredFunction"
   "GET /guest/ads EabuAdvertisement"
+  "GET /guest/zip EabuFavouritesFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.
@@ -78,6 +79,7 @@ PUBLIC_ROUTES=(
   "GET /guest/feed"              # 1.9 browsing before sign-up: no contact details, limited per IP
   "GET /guest/discovered"
   "GET /guest/ads"
+  "GET /guest/zip"               # Use my location before sign-up: position -> nearest ZIP
 )
 
 is_public() { # method path -> success when the route takes no Cognito sign-in
