@@ -166,6 +166,8 @@ Rules:
 - Nothing sexual: no adult stores, strip clubs or "massage" businesses of doubtful kind. No bars whose main
   business is alcohol, no smoke or vape shops, no cannabis dispensaries.
 - Save fetches for places you'll include. Fewer solid picks beat more weak ones.
+- Try to fill each category: if you have fewer places than asked for, search again (another cuisine or
+  kind of place, or another town nearby) before stopping. Every pick must still meet the rules above.
 
 When done searching, call save_places once with your picks, best first within each category."""
 
