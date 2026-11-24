@@ -149,15 +149,17 @@ SAVE_TOOL = {
 
 SYSTEM = """You pick top-rated local places for an app's "Discovered near you" feed.
 
-Search the public web for well-reviewed places near the given US ZIP code in the categories asked for.
+Search the public web for well-reviewed places near the given postal code (a US ZIP code, or a 6-digit PIN code in
+India) in the categories asked for.
 
 Rules:
 - Only places with a star rating of 3.0 or higher out of 5 AND a stated number of reviews, both of which
-  you actually saw on a page (Yelp, Tripadvisor, a review site, or a list page that shows them). Copy the
+  you actually saw on a page (Yelp, Tripadvisor, a review site, or a list page that shows them; in India also
+  Google Maps, Zomato or Justdial pages). Copy the
   rating and review count exactly. Never estimate, round up or guess a rating; if you can't see one, leave
   the place out.
 - source_url is the page that shows that rating: a business page or a list page, never a site's homepage.
-- Within about 25 miles of the ZIP. Prefer independent local businesses; at most one national chain per
+- Within about 25 miles (40 km) of the postal code. Prefer independent local businesses; at most one national chain per
   category, and only if it is clearly loved locally.
 - The place must still be open (skip anything marked closed or permanently closed).
 - Spread your picks across the area, not all on one street, and across different kinds within a category.
@@ -286,7 +288,8 @@ def dispatch(context, now=None):
 # Area run, places: ask Claude, check
 # ---------------------------------------------------------------------------
 def build_ask(area_zip, topics, avoid, today):
-    lines = [f"Today is {today:%A, %B %d, %Y}. Find top-rated places near ZIP {area_zip}:",
+    where = f"PIN code {area_zip}, India" if helpers.country_of_zip(area_zip) == "IN" else f"ZIP {area_zip}"
+    lines = [f"Today is {today:%A, %B %d, %Y}. Find top-rated places near {where}:",
              f"- eat: up to {EAT_PLACES} {EAT_WHAT} (at least {MIN_REVIEWS['eat']} reviews)"]
     lines += [f"- {t}: up to {LIFESTYLE_PER_TOPIC} {what} (at least {MIN_REVIEWS['lifestyle']} reviews)"
               for t, what in topics]
@@ -381,6 +384,8 @@ def pin_fields(lat, lng, area_zip):
 def geocode(address, area_zip):
     """Map pin for a street address via the US Census geocoder (free, no key; public data).
     {} for a town-only address (no house number) or no match: better no pin than a wrong one."""
+    if helpers.country_of_zip(area_zip) != "US":   # the Census geocoder only knows US addresses
+        return {}
     if not re.match(r"^\s*\d+[A-Za-z]?\s+\S", str(address or "")):
         return {}
     url = f"{CENSUS_URL}?{urllib.parse.urlencode({'address': address, 'benchmark': 'Public_AR_Current', 'format': 'json'})}"
@@ -464,7 +469,7 @@ def fetch_events(area_zip, now):
     """Raw Ticketmaster events (music, arts & theatre) within AREA_MILES over the next EVENT_DAYS days."""
     key = _ticketmaster_key()
     centre = helpers._zip_centroids().get(area_zip)
-    if not key or not centre:
+    if not key or not centre or helpers.country_of_zip(area_zip) != "US":   # Ticketmaster: US only
         return []
     params = {
         "apikey": key, "latlong": f"{centre[0]:.4f},{centre[1]:.4f}", "radius": str(AREA_MILES), "unit": "miles",

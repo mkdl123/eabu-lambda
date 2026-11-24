@@ -766,36 +766,55 @@ NEARBY_MILES = 50
 _ZIP_CENTROIDS = None
 
 
+# Centroid files bundled in the layer: US Census ZCTAs (5 digits) and India PIN codes (6 digits,
+# GeoNames, district-level precision: fine for a 50-mile radius, too coarse to pick a PIN from a
+# position, which /guest/zip asks Amazon Location for in India).
+CENTROID_FILES = ("zip_centroids.csv", "in_pin_centroids.csv")
+
+
 def _zip_centroids():
-    """{zip: (lat, lon)} from the bundled Census ZCTA file, loaded once per container."""
+    """{postal code: (lat, lon)} from the bundled centroid files, loaded once per container."""
     global _ZIP_CENTROIDS
     if _ZIP_CENTROIDS is None:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zip_centroids.csv")
         table = {}
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("#"):
-                        continue
-                    z, lat, lon = line.rstrip("\n").split(",")
-                    table[z] = (float(lat), float(lon))
-        except OSError:
-            logger.exception("ZIP centroid file missing; distance filtering falls back to exact ZIP")
+        for name in CENTROID_FILES:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("#"):
+                            continue
+                        z, lat, lon = line.rstrip("\n").split(",")
+                        table[z] = (float(lat), float(lon))
+            except OSError:
+                logger.exception("Postal centroid file %s missing; distance filtering falls back to exact codes", name)
         _ZIP_CENTROIDS = table
     return _ZIP_CENTROIDS
 
 
 _US_ZIP = re.compile(r"^(\d{5})(?:-\d{4})?$")
+_IN_PIN = re.compile(r"^([1-9]\d{2})\s?(\d{3})$")   # India: 6 digits, never starting with 0 ("560 001" ok)
 
 
 def _norm_zip(zip_code):
-    """The 5-digit ZIP from '12345' or '12345-6789'; None for anything else (e.g. a 6-digit PIN)."""
-    m = _US_ZIP.match(str(zip_code or "").strip())
-    return m.group(1) if m else None
+    """The postal code eabu keys on: a US ZIP's 5 digits ('12345', '12345-6789') or an India PIN's
+    6 digits ('560001', '560 001'); None for anything else. The two never collide (5 vs 6 digits)."""
+    raw = str(zip_code or "").strip()
+    m = _US_ZIP.match(raw)
+    if m:
+        return m.group(1)
+    m = _IN_PIN.match(raw)
+    return m.group(1) + m.group(2) if m else None
+
+
+def country_of_zip(zip_code):
+    """'US' for a ZIP, 'IN' for a PIN code, None otherwise."""
+    z = _norm_zip(zip_code)
+    return None if not z else ("US" if len(z) == 5 else "IN")
 
 
 def zip_distance_miles(zip_a, zip_b):
-    """Straight-line miles between two US ZIP centroids, or None if either is unknown.
+    """Straight-line miles between two postal code centroids (US ZIP or India PIN), or None if either is unknown.
     The same code is always 0, even if it isn't in the centroid file (PO-box ZIPs, non-US codes)."""
     raw_a, raw_b = str(zip_a or "").strip(), str(zip_b or "").strip()
     if raw_a and raw_a == raw_b:
@@ -819,7 +838,7 @@ NEAREST_ZIP_MAX_MILES = 30
 
 
 def nearest_zip(lat, lon, max_miles=NEAREST_ZIP_MAX_MILES):
-    """The US ZIP whose Census centroid is closest to (lat, lon), or None if none is within
+    """The postal code (US ZIP or India PIN) whose centroid is closest to (lat, lon), or None if none is within
     max_miles (outside the US, at sea). Turns a phone's position into a ZIP without any
     outside service. Nearest centroid, so near a boundary it can pick the neighbouring ZIP,
     which doesn't matter for a 50-mile feed."""
@@ -841,6 +860,49 @@ def nearest_zip(lat, lon, max_miles=NEAREST_ZIP_MAX_MILES):
     if best is None or math.sqrt(best_d2) * 69.05 > max_miles:
         return None
     return best
+
+
+PLACE_INDEX = os.environ.get("PLACE_INDEX_NAME", "placeIndex43161903-dev")
+_geo = None
+
+
+def in_india(lat, lon):
+    """Rough bounding box of India (the PIN code lookup's area)."""
+    return 6.0 <= lat <= 37.5 and 68.0 <= lon <= 97.5
+
+
+def india_pin_at(lat, lon):
+    """The India PIN code at a position from Amazon Location (street-level, unlike the bundled
+    district-level centroids), or None. The result is used once and never stored (the place index
+    is single-use)."""
+    global _geo
+    try:
+        if _geo is None:
+            _geo = boto3.client("location", region_name=os.environ.get("REGION_NAME", "us-east-1"))
+        res = _geo.search_place_index_for_position(IndexName=PLACE_INDEX, Position=[float(lon), float(lat)],
+                                                   MaxResults=3, Language="en")
+    except Exception:
+        logger.warning("PIN lookup failed", exc_info=True)
+        return None
+    for r in res.get("Results") or []:
+        place = r.get("Place") or {}
+        if place.get("Country") == "IND":
+            pin = _norm_zip(place.get("PostalCode"))
+            if pin and len(pin) == 6:
+                return pin
+    return None
+
+
+def postal_code_at(lat, lon):
+    """The postal code for a phone's position: India asks Amazon Location first (falling back to the
+    nearest PIN centroid), everywhere else the nearest bundled centroid (US ZIPs)."""
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    if in_india(lat, lon):
+        return india_pin_at(lat, lon) or nearest_zip(lat, lon)
+    return nearest_zip(lat, lon)
 
 
 def is_known_zip(zip_code):

@@ -4,7 +4,7 @@ Signed in only. The area is one whose member ZIPs include ?zip or whose centre i
 AREA_MILES, preferring one with current finds, then the nearest. Finds come from the weekly
 eabu-discover job (web search, not Eabu users), newest week first, and expire after 8 days.
 
-Any US ZIP gets covered: a known ZIP with no area yet becomes a new (pending) area and its
+Any US ZIP or India PIN code gets covered: a known ZIP with no area yet becomes a new (pending) area and its
 first search starts at once (cards appear a minute or two later); at most NEW_AREAS_PER_DAY
 a day (UTC), beyond that it waits for Monday. Viewing an area marks it (lastViewedAt, at most
 once a day) so the Monday run keeps searching it; unviewed areas drop out after 28 days.
@@ -216,7 +216,7 @@ def lambda_handler(event, context):
     except ValueError:
         version = 1
     if not helpers._norm_zip(zip_code):
-        return helpers._response(400, {"msg": "A 5-digit zip is required"})
+        return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
     try:
         areas, finds = _load()
     except (BotoCoreError, ClientError):

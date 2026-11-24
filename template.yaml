@@ -1220,6 +1220,11 @@ Resources:
                 - s3:GetObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
+            - Effect: Allow   # /guest/zip in India: position -> PIN code (not stored)
+              Action:
+                - geo:SearchPlaceIndexForPosition
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:geo:${Region}:${AWS::AccountId}:place-index/placeIndex43161903-dev'
 
   EabuAdvertisement:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

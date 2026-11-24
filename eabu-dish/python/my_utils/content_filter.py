@@ -37,7 +37,16 @@ BLOCKED_WORDS = {
     "penis", "vagina", "boobs", "boobies", "tits", "titties", "cock", "pussy", "fuck",
     "fucking", "hentai", "camgirl", "camboy", "onlyfans", "fansly", "pornhub", "xvideos",
     "xhamster", "chaturbate", "hookup", "gfe", "nuru",
+    # Hindi / Hinglish (India, 2.0), in Latin letters. Not "randi" or "lund" (names and places).
+    "chut", "choot", "chudai", "chodna", "chodne", "chodo", "chudwa", "chodu", "bhosda", "bhosdi",
+    "bhosdike", "lauda", "lavda", "randikhana", "randibaaz", "callgirl", "callgirls", "nangi",
 }
+# The same in Devanagari, matched on whole words (the Latin-letter matching below drops these).
+BLOCKED_DEVANAGARI = {
+    "सेक्स", "सेक्सी", "पोर्न", "चुदाई", "चूत", "लंड", "लौड़ा", "लौडा", "रंडी", "रंडीखाना",
+    "भोसड़ा", "भोसडा", "भोसड़ी", "नंगी",
+}
+_DEVANAGARI_WORD = re.compile(r"[\u0900-\u097F]+")
 # Not blocked on purpose, because real listings use them: nude (lipstick, nails), naked (cakes,
 # burritos), kinky (twist braids), nipple (baby bottles), anal (pet gland care), cum (laude),
 # vibrator (concrete, massage tools), dick (a name).
@@ -48,7 +57,7 @@ BLOCKED_PHRASES = (
     "adult massage", "nude massage", "tantric massage", "strip club", "sugar daddy",
     "sugar baby", "sugar mommy", "friends with benefits", "no strings attached", "one night stand",
     "adult entertainment", "adult services", "adult content", "sex work", "sex worker",
-    "only fans", "send nudes", "for adults only",
+    "only fans", "send nudes", "for adults only", "call girl", "call girls", "escort service",
 )
 
 # Long, unambiguous terms that are also caught inside other words or spelled with
@@ -87,6 +96,8 @@ def _word_blocked(word: str) -> bool:
 def text_is_blocked(text) -> bool:
     if not isinstance(text, str) or not text:
         return False
+    if any(w in BLOCKED_DEVANAGARI for w in _DEVANAGARI_WORD.findall(unicodedata.normalize("NFC", text))):
+        return True
     for form in _forms(text):
         words = _NON_WORD.sub(" ", form).split()
         if any(_word_blocked(w) or any(t in w for t in BLOCKED_IN_WORD) for w in words):

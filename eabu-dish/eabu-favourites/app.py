@@ -21,7 +21,7 @@ screen's Map view shows them all at once.
 
 GET    /guest/demand?zip=   PUBLIC: number of buyer requests within 50 miles in the last 7 days,
                              total and per category (counts only), for the guest Home card.
-GET    /guest/zip?lat=&lng=   PUBLIC: the nearest US ZIP to a position (Use my location before
+GET    /guest/zip?lat=&lng=   PUBLIC: the ZIP or India PIN code at a position (Use my location before
                                sign-up), from the bundled Census centroids; nothing stored.
 GET    /guest/feed?zip=12345[&kind=seller|buyer]   PUBLIC (no sign-in): what a guest sees before
                                                    creating an account. Everyone's current posts of that
@@ -354,7 +354,7 @@ def guest_feed(event):
         return helpers._response(400, {"msg": "kind must be seller or buyer"})
     zip_code = str(query.get("zip") or "").strip()[:10]
     if not helpers._norm_zip(zip_code):
-        return helpers._response(400, {"msg": "A 5-digit zip is required"})
+        return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
     map_only, limit, after = _paging_or_map(event)
     cutoff = helpers.post_limit_cutoff()
     posts = []
@@ -382,7 +382,7 @@ def guest_demand(event):
     query = event.get("queryStringParameters") or {}
     zip_code = str(query.get("zip") or "").strip()[:10]
     if not helpers._norm_zip(zip_code):
-        return helpers._response(400, {"msg": "A 5-digit zip is required"})
+        return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
     cutoff = (datetime.now(timezone.utc) - timedelta(days=DEMAND_DAYS)).isoformat()
     by_category = {}
     for category in CATEGORIES:
@@ -396,9 +396,9 @@ def guest_zip(event):
     """GET /guest/zip?lat=&lng= (public): the ZIP for the phone's position, for "Use my location"
     before sign-up. The position is never stored or logged."""
     query = event.get("queryStringParameters") or {}
-    zip_code = helpers.nearest_zip(query.get("lat"), query.get("lng"))
+    zip_code = helpers.postal_code_at(query.get("lat"), query.get("lng"))
     if not zip_code:
-        return helpers._response(404, {"msg": "No US ZIP code near this location"})
+        return helpers._response(404, {"msg": "No ZIP or PIN code near this location"})
     return _json(200, {"zip": zip_code})
 
 
