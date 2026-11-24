@@ -116,3 +116,19 @@ def test_nearest_zip_from_position():
     assert helpers.nearest_zip(51.5, -0.12) is None
     assert helpers.nearest_zip("x", None) is None
     assert helpers.nearest_zip(95, 0) is None
+
+
+@mock_aws
+def test_guest_demand_counts_nearby_buyer_requests_only():
+    tables, fn = setup()
+    listing("live", "consumer", "b1")
+    listing("live", "consumer", "b2")
+    listing("move", "consumer", "b3")
+    listing("eat", "provider", "seller1")                # sellers don't count
+    listing("live", "consumer", "far", zip_code="94103")  # San Francisco, too far
+    res = fn.lambda_handler(guest("/guest/demand", {"zip": ZIP}), None)
+    assert res["statusCode"] == 200
+    out = json.loads(res["body"])
+    assert out["requests"] == 3 and out["byCategory"] == {"eat": 0, "live": 2, "move": 1, "lifestyle": 0}
+    assert out["days"] == 7 and set(out) == {"zip", "days", "requests", "byCategory", "radiusMiles"}
+    assert fn.lambda_handler(guest("/guest/demand", {}), None)["statusCode"] == 400

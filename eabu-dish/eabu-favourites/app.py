@@ -19,6 +19,8 @@ Either feed with ?map=1 returns only posts whose poster added an address with a 
 (addressLat/addressLng), unpaged (limit/cursor are ignored), up to MAP_MAX_POSTS: the Home
 screen's Map view shows them all at once.
 
+GET    /guest/demand?zip=   PUBLIC: number of buyer requests within 50 miles in the last 7 days,
+                             total and per category (counts only), for the guest Home card.
 GET    /guest/zip?lat=&lng=   PUBLIC: the nearest US ZIP to a position (Use my location before
                                sign-up), from the bundled Census centroids; nothing stored.
 GET    /guest/feed?zip=12345[&kind=seller|buyer]   PUBLIC (no sign-in): what a guest sees before
@@ -41,7 +43,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
@@ -281,7 +283,7 @@ def _recent_posts(table, cutoff):
     """Every post in the table created since cutoff, reusing a scan made in the last
     SCAN_CACHE_SECONDS (its cutoff is at most that much older, so it is filtered again)."""
     cached = _scan_cache.get(table.name)
-    if cached and time.time() - cached[0] < SCAN_CACHE_SECONDS:
+    if cached and time.time() - cached[0] < SCAN_CACHE_SECONDS and str(cached[1]) <= cutoff:
         return [i for i in cached[2] if str(i.get("createdAt", "")) >= cutoff]
     items = _recent_posts_uncached(table, cutoff)
     _scan_cache[table.name] = (time.time(), cutoff, items)
@@ -370,6 +372,26 @@ def guest_feed(event):
     return _json(200, result)
 
 
+DEMAND_DAYS = 7
+
+
+def guest_demand(event):
+    """GET /guest/demand?zip= (public): how many buyer requests were posted within NEARBY_MILES
+    in the last DEMAND_DAYS days, in total and per category, for the "Earn money" card guests
+    see on Home. Counts only; nothing about the posts or who made them."""
+    query = event.get("queryStringParameters") or {}
+    zip_code = str(query.get("zip") or "").strip()[:10]
+    if not helpers._norm_zip(zip_code):
+        return helpers._response(400, {"msg": "A 5-digit zip is required"})
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=DEMAND_DAYS)).isoformat()
+    by_category = {}
+    for category in CATEGORIES:
+        found = [{"zipcode": i.get("zipcode")} for i in _recent_posts(_table_for("buyer", category), cutoff)]
+        by_category[category] = len(helpers.within_miles(zip_code, found, helpers.NEARBY_MILES))
+    return _json(200, {"zip": zip_code, "days": DEMAND_DAYS, "requests": sum(by_category.values()),
+                       "byCategory": by_category, "radiusMiles": helpers.NEARBY_MILES})
+
+
 def guest_zip(event):
     """GET /guest/zip?lat=&lng= (public): the ZIP for the phone's position, for "Use my location"
     before sign-up. The position is never stored or logged."""
@@ -392,6 +414,8 @@ def lambda_handler(event, context):
                 return guest_feed(event)
             if method == "GET" and resource == "/guest/zip":
                 return guest_zip(event)
+            if method == "GET" and resource == "/guest/demand":
+                return guest_demand(event)
             return helpers._response(404, {"msg": "Not found"})
         if method == "POST":
             return add_favourite(event)
