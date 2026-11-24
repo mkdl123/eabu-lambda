@@ -76,11 +76,12 @@ def test_areas_group_nearby_zips_busiest_first():
     assert fn.group_areas({"19060": 5, "10003": 3}, max_areas=1) == [("19060", ["19060"], 5)]
 
 
-def test_checks_keep_only_well_rated_new_places_within_each_topics_cap():
+def test_checks_keep_only_well_rated_new_places_within_each_topics_cap(monkeypatch):
     fn = load("eabu-discover")
-    topics = fn.topics_for_week(TODAY)
-    assert [t for t, _ in topics] in (["fitness", "yoga"], ["beauty", "pets"])
-    other = "pets" if topics[0][0] == "fitness" else "yoga"
+    monkeypatch.setattr(fn, "EAT_PLACES", 4)            # small caps keep the case short
+    monkeypatch.setattr(fn, "LIFESTYLE_PER_TOPIC", 2)
+    topics = [("fitness", ""), ("yoga", "")]
+    other = "pets"
     t1 = topics[0][0]
     kept = fn.check_places([
         place(),
@@ -107,12 +108,12 @@ def test_checks_keep_only_well_rated_new_places_within_each_topics_cap():
     assert kept[0]["sourceSite"] == "yelp.com" and kept[0]["rating"] == 4.6
 
 
-def test_lifestyle_topics_alternate_weekly():
+def test_all_lifestyle_topics_every_week():
     fn = load("eabu-discover")
     from datetime import timedelta
-    a, b = fn.topics_for_week(TODAY), fn.topics_for_week(TODAY + timedelta(days=7))
-    assert {t for t, _ in a} | {t for t, _ in b} == {"fitness", "yoga", "beauty", "pets"}
-    assert fn.topics_for_week(TODAY + timedelta(days=14)) == a
+    for days in (0, 7):
+        assert [t for t, _ in fn.topics_for_week(TODAY + timedelta(days=days))] == ["fitness", "yoga", "beauty", "pets"]
+    assert (fn.EAT_PLACES, fn.LIFESTYLE_PER_TOPIC) == (8, 3)
 
 
 def test_place_card_keeps_the_fields_older_builds_show():
@@ -182,7 +183,7 @@ def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     assert int(cards[0]["expiresAt"]) == int(NOW.timestamp()) + 8 * 86400 and cards[0]["weekOf"] == "2026-11-23"
     assert area["zips"] == ["19060", "19033"] and set(area["shownPlaces"]) == {"taco heart", "iron barn"}
     ask = fake.calls[0]["messages"][0]["content"]
-    assert "ZIP 19060" in ask and "- eat: up to 4" in ask and f"- {topic}: up to 2" in ask and len(fake.calls) == 2
+    assert "ZIP 19060" in ask and "- eat: up to 8" in ask and f"- {topic}: up to 3" in ask and "- pets: up to 3" in ask and len(fake.calls) == 2
     assert fake.calls[0]["model"] == "claude-haiku-5-5"
 
     # A re-run the same week replaces the week's cards (and may show this week's places again).

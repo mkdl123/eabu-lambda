@@ -11,10 +11,10 @@ Monday run (scheduled event):
   3. Invokes this same function once per area, asynchronously ({"areaZip": ..., ...}), so a
      slow or failed area doesn't hold up the others.
 
-Area run (that payload) saves up to about a dozen cards for the week:
+Area run (that payload) saves up to about 24 cards for the week:
   - Top-rated places (Claude, MODEL, with web search): EAT_PLACES restaurants/cafes, plus
-    LIFESTYLE_PER_TOPIC places for each of this week's two Lifestyle topics (LIFESTYLE_TOPICS
-    alternate weekly: fitness + yoga, then beauty + pets). A place is kept only if Claude saw a
+    LIFESTYLE_PER_TOPIC places for each Lifestyle topic (LIFESTYLE_TOPICS: fitness, yoga,
+    beauty and pets, all every week). A place is kept only if Claude saw a
     rating of at least MIN_RATING with enough reviews on a specific https page, it passes the
     content filter, and it wasn't shown in the last SKIP_DAYS days, so each week brings a
     different set.
@@ -71,21 +71,21 @@ AREA_MILES = 25
 POST_DAYS = 60
 VIEWED_DAYS = 28
 SKIP_DAYS = 28          # a place shown in the last 4 weeks isn't shown again
-EAT_PLACES = 4
-LIFESTYLE_PER_TOPIC = 2
+EAT_PLACES = 8
+LIFESTYLE_PER_TOPIC = 3
 MAX_EVENTS = 4
 EVENT_DAYS = 7
 MIN_RATING = 3.0
 MIN_REVIEWS = {"eat": 50, "lifestyle": 15}   # small studios and vets have fewer reviews
-MAX_SEARCHES = 15
-MAX_FETCHES = 8
+MAX_SEARCHES = 25
+MAX_FETCHES = 12
 MAX_PER_SOURCE = 3      # a "best yoga near X" list page may back a few places
 EXPIRE_DAYS = 8
 AREA_ROW = 0
 POST_TABLES = [f"{c}_{r}" for c in ("EAT", "LIVE", "MOVE", "LIFESTYLE") for r in ("CONSUMER", "PROVIDER")]
 LIMITS = {"name": 100, "place_type": 60, "address_or_area": 150, "what": 300, "rating_site": 40}
 
-# (topic, what to search for). Two a week, alternating, so each comes back every other week.
+# (topic, what to search for). All four every week.
 LIFESTYLE_TOPICS = [
     ("fitness", "gyms and fitness studios (strength, boxing, cycling, martial arts)"),
     ("yoga", "yoga and pilates studios"),
@@ -179,7 +179,7 @@ def _claude():
     if _client is None:
         import anthropic  # only area runs need it
         key = ssm.get_parameter(Name=API_KEY_PARAM, WithDecryption=True)["Parameter"]["Value"]
-        _client = anthropic.Anthropic(api_key=key, timeout=240, max_retries=1)
+        _client = anthropic.Anthropic(api_key=key, timeout=480, max_retries=1)
     return _client
 
 
@@ -206,9 +206,8 @@ def week_start(today=None):
 
 
 def topics_for_week(week):
-    """This week's two Lifestyle topics: fitness + yoga one week, beauty + pets the next."""
-    half = (week.toordinal() // 7) % 2
-    return LIFESTYLE_TOPICS[half * 2: half * 2 + 2]
+    """This week's Lifestyle topics: all four every week (until 2026-11-23 they alternated two by two)."""
+    return list(LIFESTYLE_TOPICS)
 
 
 def active_zip_counts(now=None):

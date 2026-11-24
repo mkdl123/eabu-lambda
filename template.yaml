@@ -1404,7 +1404,7 @@ Resources:
     Properties:
       CodeUri: eabu-dish/eabu-discover
       Handler: app.lambda_handler
-      Timeout: 300   # one area: about 1-2 minutes of searching
+      Timeout: 600   # one area: about 2-5 minutes of searching (8 food + 4 x 3 Lifestyle places)
       Environment:
         Variables:
           DISCOVERED_TABLE_NAME: !Ref DiscoveredTableName
