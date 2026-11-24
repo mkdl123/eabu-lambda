@@ -11,7 +11,7 @@ Monday run (scheduled event):
   3. Invokes this same function once per area, asynchronously ({"areaZip": ..., ...}), so a
      slow or failed area doesn't hold up the others.
 
-Area run (that payload) saves up to about 24 cards for the week:
+Area run (that payload) saves up to about 36 cards for the week:
   - Top-rated places (Claude, MODEL, with web search): EAT_PLACES restaurants/cafes, plus
     LIFESTYLE_PER_TOPIC places for each Lifestyle topic (LIFESTYLE_TOPICS: fitness, yoga,
     beauty and pets, all every week). A place is kept only if Claude saw a
@@ -70,15 +70,15 @@ MAX_AREAS = int(os.environ.get("DISCOVER_MAX_AREAS", "40"))
 AREA_MILES = 25
 POST_DAYS = 60
 VIEWED_DAYS = 28
-SKIP_DAYS = 28          # a place shown in the last 4 weeks isn't shown again
-EAT_PLACES = 8
-LIFESTYLE_PER_TOPIC = 3
+SKIP_DAYS = 14          # a place shown in the last 2 weeks isn't shown again
+EAT_PLACES = 12
+LIFESTYLE_PER_TOPIC = 5
 MAX_EVENTS = 4
 EVENT_DAYS = 7
 MIN_RATING = 3.0
 MIN_REVIEWS = {"eat": 50, "lifestyle": 15}   # small studios and vets have fewer reviews
-MAX_SEARCHES = 25
-MAX_FETCHES = 12
+MAX_SEARCHES = 30
+MAX_FETCHES = 16
 MAX_PER_SOURCE = 3      # a "best yoga near X" list page may back a few places
 EXPIRE_DAYS = 8
 AREA_ROW = 0
@@ -302,7 +302,7 @@ def ask_claude(area_zip, topics, avoid, today):
     messages = [{"role": "user", "content": build_ask(area_zip, topics, avoid, today)}]
     usage = {"input": 0, "output": 0, "searches": 0}
     for _ in range(6):  # pause_turn resumes
-        res = _claude().messages.create(model=MODEL, max_tokens=16000, output_config={"effort": "medium"},
+        res = _claude().messages.create(model=MODEL, max_tokens=24000, output_config={"effort": "medium"},
                                         system=SYSTEM, tools=tools, messages=messages)
         usage["input"] += res.usage.input_tokens or 0
         usage["output"] += res.usage.output_tokens or 0

@@ -113,7 +113,7 @@ def test_all_lifestyle_topics_every_week():
     from datetime import timedelta
     for days in (0, 7):
         assert [t for t, _ in fn.topics_for_week(TODAY + timedelta(days=days))] == ["fitness", "yoga", "beauty", "pets"]
-    assert (fn.EAT_PLACES, fn.LIFESTYLE_PER_TOPIC) == (8, 3)
+    assert (fn.EAT_PLACES, fn.LIFESTYLE_PER_TOPIC, fn.SKIP_DAYS) == (12, 5, 14)
 
 
 def test_place_card_keeps_the_fields_older_builds_show():
@@ -183,7 +183,7 @@ def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     assert int(cards[0]["expiresAt"]) == int(NOW.timestamp()) + 8 * 86400 and cards[0]["weekOf"] == "2026-11-23"
     assert area["zips"] == ["19060", "19033"] and set(area["shownPlaces"]) == {"taco heart", "iron barn"}
     ask = fake.calls[0]["messages"][0]["content"]
-    assert "ZIP 19060" in ask and "- eat: up to 8" in ask and f"- {topic}: up to 3" in ask and "- pets: up to 3" in ask and len(fake.calls) == 2
+    assert "ZIP 19060" in ask and "- eat: up to 12" in ask and f"- {topic}: up to 5" in ask and "- pets: up to 5" in ask and len(fake.calls) == 2
     assert fake.calls[0]["model"] == "claude-haiku-5-5"
 
     # A re-run the same week replaces the week's cards (and may show this week's places again).
@@ -201,10 +201,13 @@ def test_area_run_saves_places_and_events_and_rotates_places(monkeypatch):
     week2 = [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261130]
     assert week2 == ["New Diner"]
 
-    # Five weeks later Taco Heart may come back.
+    # Two weeks later it's still skipped; three weeks later Taco Heart may come back.
     fn._client = FakeClaude([place()])
-    fn.run_area({"areaZip": "19060"}, now=NOW + timedelta(days=35))
-    assert [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261228] == ["Taco Heart"]
+    fn.run_area({"areaZip": "19060"}, now=NOW + timedelta(days=14))
+    assert [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261207] == []
+    fn._client = FakeClaude([place()])
+    fn.run_area({"areaZip": "19060"}, now=NOW + timedelta(days=21))
+    assert [r["place"] for r in table.scan()["Items"] if int(r["ID"]) // 100 == 20261214] == ["Taco Heart"]
 
 
 def test_ticketmaster_is_skipped_without_a_key(monkeypatch):
