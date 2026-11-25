@@ -72,6 +72,7 @@ ROUTES=(
   "POST /guest/sign-in-name EabuEmailSignInFunction"
   "POST /guest/forgot-password EabuEmailSignInFunction"
   "POST /guest/reset-password EabuEmailSignInFunction"
+  "GET /guest/status EabuAppStatusFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.
@@ -88,6 +89,7 @@ PUBLIC_ROUTES=(
   "POST /guest/sign-in-name"     # 2.1 sign in with email: email + password -> User Id
   "POST /guest/forgot-password"
   "POST /guest/reset-password"
+  "GET /guest/status"            # kill switch: the app's maintenance message; stays open while paused
 )
 
 is_public() { # method path -> success when the route takes no Cognito sign-in

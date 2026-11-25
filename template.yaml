@@ -1394,6 +1394,22 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${PostCreditsTableName}'
 
+  # GET /guest/status (public): {"paused": bool, "message"} for the app's maintenance screen.
+  # The one function scripts/kill-switch.sh leaves running; reads SSM /eabu/app-status.
+  EabuAppStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-app-status
+      Handler: app.lambda_handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/app-status'
+
   # Report a post, request, offer, ad or profile (App Store guideline 1.2): saved + emailed for review.
   EabuReportFunction:
     Type: AWS::Serverless::Function
