@@ -233,10 +233,13 @@ def lambda_handler(event, context):
                 break
             kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
 
-        # Paid ads show to everyone, whatever the ZIP, while their paid period lasts.
-        # Free ads only show within NEARBY_MILES of the ZIP, as before.
+        # Paid ads show to everyone in the ad's country (US ZIP / India PIN), whatever the ZIP,
+        # while their paid period lasts. Free ads only show within NEARBY_MILES of the ZIP, as before.
         now = int(datetime.now(timezone.utc).timestamp())
         paid = [i for i in found if i.get('paid') is True]
+        viewer_country = helpers.country_of_zip(zip_code) if zip_code else None
+        if viewer_country:
+            paid = [i for i in paid if helpers.country_of_zip(i.get('zipcode')) == viewer_country]
         free = [i for i in found if i.get('paid') is not True]
         national = [{**{k: i[k] for k in PUBLIC_AD_FIELDS if k in i}, 'nationwide': True}
                     for i in paid if int(i.get('paidThrough') or 0) > now]

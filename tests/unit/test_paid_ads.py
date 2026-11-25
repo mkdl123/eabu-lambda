@@ -111,6 +111,19 @@ def test_paid_ad_goes_live_nationwide_after_verified_purchase(monkeypatch):
     assert far["Count"] == 1 and far["Items"][0]["nationwide"] is True
     assert not {"email", "phone", "name", "address", "ownerUserId", "originalTransactionId"} & set(far["Items"][0])
 
+    # Not shown in another country (India PIN code); shown with no ZIP at all.
+    assert public_ads("560001")["Count"] == 0
+    assert public_ads("")["Count"] == 1
+
+
+@mock_aws
+def test_india_paid_ad_shows_only_in_india():
+    make_ad_table().put_item(Item={
+        "zipcode": "560001", "ID": 7, "ownerUserId": "ravi", "paid": True, "status": "active",
+        "paidThrough": NOW + 30 * DAY, "title": "Bengaluru ad"})
+    assert public_ads("110001")["Count"] == 1 and public_ads("110001")["Items"][0]["nationwide"] is True
+    assert public_ads("19060")["Count"] == 0
+
 
 @mock_aws
 def test_first_ad_is_free_and_live_nationwide(monkeypatch):
