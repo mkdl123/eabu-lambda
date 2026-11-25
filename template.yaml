@@ -379,6 +379,7 @@ Resources:
                 - s3:DeleteObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/ads/*'
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/*/profile.jpg'
             - Effect: Allow
               Action:
@@ -1156,6 +1157,7 @@ Resources:
                 - s3:DeleteObject
               Resource:
                 - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/listings/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/ads/*'
             - Effect: Allow
               Action:
                 - rekognition:DetectModerationLabels  # nudity check before saving (content_filter)
@@ -1165,6 +1167,7 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'   # ad pictures
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${EatProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveProviderTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveProviderTableName}'
@@ -1245,6 +1248,11 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}/index/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject   # ad picture links
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/ads/*'
 
   EabuAdRequest:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -1289,6 +1297,11 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${AdTableName}'
+            - Effect: Allow
+              Action:
+                - s3:GetObject   # ad picture links
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${IdentityBucketName}/ads/*'
 
   # Extra posts: verifies an Apple purchase of the $0.99 pack and adds 15 posts.
   EabuPostCreditsFunction:

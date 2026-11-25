@@ -170,6 +170,9 @@ def delete_user(user_id: str) -> dict:
         with ads.batch_writer() as batch:
             apple_iap.mark_free_ad_used(batch, user_id, email)
     counts["ads"] = _delete_rows(ads, owned_ads, ("zipcode", "ID"))
+    for ad in owned_ads:
+        if any(ad.get(f"picture{slot}") for slot in helpers.PICTURE_SLOTS):
+            _delete_listing_pictures(helpers.AD_PICTURE_CATEGORY, ad["ID"])
 
     # Post credits: delete the balance; keep purchase records (replay protection) but unlink them.
     credits.delete_item(Key={"userId": user_id})

@@ -1,7 +1,7 @@
-"""Up to four pictures per seller service listing: upload (replacing that slot) or delete.
+"""Up to four pictures per seller service listing or ad: upload (replacing that slot) or delete.
 
 POST   /listing-picture
-       body {"category": "eat|live|move|lifestyle", "zipcode", "itemId", "slot": "1"|"2",
+       body {"category": "eat|live|move|lifestyle|ad", "zipcode", "itemId", "slot": "1"-"4",
              "picture": <base64 image>}
 DELETE /listing-picture/{category}/{zipcode}/{itemId}/{slot}
 
@@ -13,6 +13,9 @@ upload overwrites that slot and a delete removes it for good), and the listing r
 picture{slot} = upload time so the read functions know which links to sign. The listing
 itself is never deleted here: sellers can't delete posts (posts count toward the monthly
 limit).
+
+Category "ad" is an advertiser's ad (the ad table, owner = ownerUserId), stored at
+ads/{ID}/{slot}.jpg; the same Rekognition check applies.
 """
 import base64
 import io
@@ -36,7 +39,9 @@ TABLE_ENV = {
     "live": ("LIVE_PROVIDER_TABLE_NAME", "eabu-live-provider"),
     "move": ("MOVE_PROVIDER_TABLE_NAME", "eabu-move-provider"),
     "lifestyle": ("LIFESTYLE_PROVIDER_TABLE_NAME", "eabu-lifestyle-provider"),
+    helpers.AD_PICTURE_CATEGORY: ("AD_TABLE_NAME", "eabu-advertisement"),
 }
+OWNER_FIELD = {helpers.AD_PICTURE_CATEGORY: "ownerUserId"}  # listings: userId
 MAX_FILE_SIZE = 8 * 1024 * 1024
 MAX_DIMENSION = 1600
 ALLOWED_IMAGE_FORMATS = ["JPEG", "PNG", "WEBP"]
@@ -86,7 +91,7 @@ def check_picture(image: bytes, item_id):
 
 def _listing_target(event, category, zipcode, item_id, slot):
     """Return ((table, key, item_id, slot), None) when the caller owns the listing, else (None, response)."""
-    if category not in helpers.LISTING_CATEGORIES:
+    if category not in TABLE_ENV:
         return None, helpers._response(400, {"msg": "Invalid category"})
     if str(slot) not in helpers.PICTURE_SLOTS:
         return None, helpers._response(400, {"msg": "slot must be 1 to 4"})
@@ -106,16 +111,19 @@ def _listing_target(event, category, zipcode, item_id, slot):
     env, default = TABLE_ENV[category]
     table = dynamodb.Table(os.environ.get(env, default))
     key = {"zipcode": zipcode, "ID": item_id}
+    owner_field = OWNER_FIELD.get(category, "userId")
     try:
-        item = table.get_item(Key=key, ProjectionExpression="userId").get("Item")
+        item = table.get_item(Key=key, ProjectionExpression=f"ID, {owner_field}").get("Item")
     except (BotoCoreError, ClientError):
         logger.exception("Failed to look up listing")
         return None, helpers._response(500, {"msg": "Failed to update picture"})
     if not item:
         return None, helpers._response(404, {"msg": "Listing not found"})
 
-    # Only the seller who posted the listing may change its pictures.
-    denied = helpers.authorize_user(event, item.get("userId"))
+    # Only the seller who posted the listing (or the ad's owner) may change its pictures.
+    if not item.get(owner_field):
+        return None, helpers._response(403, {"msg": "Forbidden"})
+    denied = helpers.authorize_user(event, item.get(owner_field))
     if denied:
         return None, denied
     return (table, key, item_id, str(slot)), None

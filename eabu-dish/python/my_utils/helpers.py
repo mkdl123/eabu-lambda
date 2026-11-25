@@ -290,7 +290,14 @@ PICTURE_URL_SECONDS = 3600
 _s3_client = None
 
 
+# Ads (category "ad") may have up to four pictures too, at ads/{ID}/{slot}.jpg: outside listings/,
+# whose pictures the bucket deletes after 60 days, because ads can run longer.
+AD_PICTURE_CATEGORY = "ad"
+
+
 def listing_picture_key(category: str, item_id, slot: str) -> str:
+    if category == AD_PICTURE_CATEGORY:
+        return f"ads/{int(item_id)}/{slot}.jpg"
     return f"listings/{category}/{int(item_id)}/{slot}.jpg"
 
 

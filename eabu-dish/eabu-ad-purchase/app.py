@@ -30,7 +30,7 @@ table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us
     os.environ.get("AD_TABLE_NAME", "eabu-advertisement"))
 
 MY_AD_FIELDS = ("ID", "zipcode", "status", "title", "subtitle", "description", "url",
-                "paidThrough", "autoRenew", "createdAt", "freeAd")
+                "paidThrough", "autoRenew", "createdAt", "freeAd", "picture1", "picture2", "picture3", "picture4")
 MAX_JWS_LENGTH = 20000
 REMOVED_STATUS = "removed"   # set by an admin to take a paid ad down
 
@@ -66,7 +66,10 @@ def _my_ad(event):
     ads = _paid_ads_of(str(user_id))
     live = [a for a in ads if a.get("status") == apple_iap.PAID_STATUS]
     ad = (live or ads or [None])[0]
-    return _ok({"ad": {k: ad[k] for k in MY_AD_FIELDS if k in ad} if ad else None,
+    mine = {k: ad[k] for k in MY_AD_FIELDS if k in ad} if ad else None
+    if mine:
+        helpers.attach_picture_urls([mine], helpers.AD_PICTURE_CATEGORY)
+    return _ok({"ad": mine,
                 "firstAdFree": apple_iap.first_ad_free(ads) and not apple_iap.free_ad_used_before(
                     table, user_id, helpers.get_caller_email(event)),
                 "productId": apple_iap.product_id(),

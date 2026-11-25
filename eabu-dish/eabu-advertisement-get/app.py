@@ -17,7 +17,8 @@ table = boto3.resource("dynamodb", region_name=os.environ.get("REGION_NAME", "us
     os.environ.get("AD_TABLE_NAME", "eabu-advertisement"))
 
 # Only these fields are public. The submitter's name, email, phone and address never are.
-PUBLIC_AD_FIELDS = ("ID", "zipcode", "status", "country", "title", "subtitle", "url", "description", "createdAt")
+PUBLIC_AD_FIELDS = ("ID", "zipcode", "status", "country", "title", "subtitle", "url", "description", "createdAt",
+                    "picture1", "picture2", "picture3", "picture4")
 
 
 def _public_statuses():
@@ -243,6 +244,8 @@ def lambda_handler(event, context):
         if zip_code:
             items = helpers.within_miles(zip_code, items, helpers.NEARBY_MILES)
         items = national + items
+        # Picture links (short-lived) for ads with pictures; picture1..4 are the upload times.
+        helpers.attach_picture_urls(items, helpers.AD_PICTURE_CATEGORY)
         return {
             'statusCode': 200,
             'body': json.dumps({'Items': items, 'Count': len(items),
