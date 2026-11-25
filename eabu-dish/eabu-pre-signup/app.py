@@ -40,6 +40,10 @@ class EmailBlocked(Exception):
     pass
 
 
+class EmailInUse(Exception):
+    pass
+
+
 class UserIdBlocked(Exception):
     pass
 
@@ -98,9 +102,28 @@ def lambda_handler(event, context):
     invited_by = _invited_by(event)
     inviter = _check_inviter(event, invited_by) if invited_by else None
     _check_email(email)
+    _check_email_unused(event, email)
     if inviter:
         _save_referral(event, inviter, email)
     return event
+
+
+def _check_email_unused(event, email):
+    """One account per email: people can sign in with their email (2.1), so it must name one account."""
+    pool = event.get("userPoolId")
+    if not email or not pool:
+        return
+    try:
+        for candidate in dict.fromkeys([email.strip(), email.strip().lower()]):
+            safe = candidate.replace("\\", "").replace('"', "")
+            users = cognito.list_users(UserPoolId=pool, Filter=f'email = "{safe}"',
+                                       Limit=2).get("Users", [])
+            if any(u.get("Username", "").lower() != str(event.get("userName", "")).lower() for u in users):
+                logger.info("Sign-up refused: email already used by another account")
+                raise EmailInUse("An account already uses this email. Sign in with it, or use "
+                                 "Forgot password if you don't remember the password.")
+    except (BotoCoreError, ClientError):
+        logger.exception("Email-in-use lookup failed; allowing sign-up")
 
 
 def _check_email(email):

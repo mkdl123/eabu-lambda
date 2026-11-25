@@ -251,6 +251,10 @@ Parameters:
     Default: us-east-1:53cd420f-6f1e-409a-80fe-f65b803e9fd7
     Description: Cognito identity pool the app uses (account deletion removes the user's identity).
 
+  SignInClientId:
+    Type: String
+    Default: 7emdutup36m0sj85m36ldoh351
+    Description: Server-only user pool app client (ALLOW_ADMIN_USER_PASSWORD_AUTH) for sign in with email.
   UserPoolId:
     Type: String
     Default: us-east-1_G0VobzUMd
@@ -409,6 +413,32 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LiveConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${LifestyleConsumerTableName}'
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${MoveConsumerTableName}'
+  # Sign in with an email (2.1): POST /guest/sign-in-name, /guest/forgot-password,
+  # /guest/reset-password swap an email for the User Id on the username-only pool.
+  EabuEmailSignInFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-email-sign-in
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPoolId
+          SIGN_IN_CLIENT_ID: !Ref SignInClientId
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow   # per IP and per email tries
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
+            - Effect: Allow
+              Action:
+                - cognito-idp:ListUsers
+                - cognito-idp:AdminInitiateAuth
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cognito-idp:${Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+
   # Cognito pre sign-up trigger (no API route): refuses sign-ups with a recently deleted
   # account's email. Attached to the user pool by scripts/attach-pre-signup-trigger.py.
   EabuPreSignupFunction:
@@ -432,6 +462,7 @@ Resources:
             - Effect: Allow   # check the "Invited by" User Id exists
               Action:
                 - cognito-idp:AdminGetUser
+                - cognito-idp:ListUsers   # one account per email
               Resource:
                 - !Sub 'arn:${AWS::Partition}:cognito-idp:${Region}:${AWS::AccountId}:userpool/${UserPoolId}'
 

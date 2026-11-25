@@ -69,6 +69,9 @@ ROUTES=(
   "GET /guest/ads EabuAdvertisement"
   "GET /guest/zip EabuFavouritesFunction"
   "GET /guest/demand EabuFavouritesFunction"
+  "POST /guest/sign-in-name EabuEmailSignInFunction"
+  "POST /guest/forgot-password EabuEmailSignInFunction"
+  "POST /guest/reset-password EabuEmailSignInFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.
@@ -82,6 +85,9 @@ PUBLIC_ROUTES=(
   "GET /guest/ads"
   "GET /guest/zip"               # Use my location before sign-up: position -> nearest ZIP
   "GET /guest/demand"            # guest Home card: count of buyer requests nearby (counts only)
+  "POST /guest/sign-in-name"     # 2.1 sign in with email: email + password -> User Id
+  "POST /guest/forgot-password"
+  "POST /guest/reset-password"
 )
 
 is_public() { # method path -> success when the route takes no Cognito sign-in
