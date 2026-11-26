@@ -1508,6 +1508,11 @@ Resources:
                 - dynamodb:BatchWriteItem
               Resource:
                 - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${DiscoveredTableName}'
+            - Effect: Allow   # what people searched for on Home (searches#<area>#<week> counts, keys only)
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/${RateLimitTableName}'
             - Effect: Allow   # the Claude and Ticketmaster API keys (SecureString, AWS-managed key)
               Action:
                 - ssm:GetParameter

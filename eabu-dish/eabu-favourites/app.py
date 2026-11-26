@@ -10,6 +10,10 @@ GET    /favourites-feed/{userId}/{kind}?zip=12345&nearby=1
                                                    of ?zip (not the user's own), favourites flagged with
                                                    isFavourite
 
+Search on Home: the nearby and guest feeds take ?q= (e.g. "indian food", "dog walker") and then
+return only the posts that match, best match first (my_utils/search.py), paged and capped as usual.
+A search isn't counted as an app open.
+
 The first page of the nearby and guest feeds (not ?map=1, no ?cursor) counts an app open for
 that ZIP/PIN (helpers.count_open; read with scripts/opens.py).
 
@@ -53,7 +57,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-from my_utils import helpers
+from my_utils import helpers, search
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -226,10 +230,23 @@ def _paging_or_map(event):
     return (False, *_paging(event))
 
 
-def _finish(posts, map_only, limit, after, default_cap=None):
-    """Keep only pinned posts for the map, then sort and page/cap. Returns (posts, nextCursor)."""
+def _search(event):
+    """The parsed ?q= (Search on Home), or None when the request isn't a search."""
+    q = (event.get("queryStringParameters") or {}).get("q")
+    return None if q is None else search.parse_query(q)
+
+
+def _finish(posts, map_only, limit, after, default_cap=None, query=None):
+    """Keep only pinned posts for the map, then sort and page/cap. Returns (posts, nextCursor).
+    A search keeps only matching posts, best match first (newest first among equals)."""
     if map_only:
         posts = [p for p in posts if helpers.has_address_pin(p)]
+    if query is not None:
+        posts.sort(key=_sort_key, reverse=True)
+        posts = search.rank(posts, query, search.post_score)
+        if limit is not None:  # ranked, so the cursor is a position rather than a sort key
+            return posts[:limit], None
+        return posts[:default_cap] if default_cap else posts, None
     posts, next_cursor = _page(posts, limit, after)
     if map_only:
         posts = posts[:MAP_MAX_POSTS]
@@ -316,7 +333,8 @@ def nearby_feed(event, user_id, kind, zip_code):
     if not zip_code:
         return helpers._response(400, {"msg": "zip is required"})
     map_only, limit, after = _paging_or_map(event)
-    if not map_only and after is None:
+    query = _search(event)
+    if not map_only and after is None and query is None:
         helpers.count_open(event, zip_code)  # Home opened (first page), for scripts/opens.py
     fav_ids = {f["favUserId"] for f in _list(user_id, kind)}
     skip = _blocked_ids(user_id) | {user_id}
@@ -327,7 +345,7 @@ def nearby_feed(event, user_id, kind, zip_code):
                  for i in _recent_posts(_table_for(kind, category), cutoff) if i.get("userId") not in skip]
         found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
         posts += [{**p, "category": category, "isFavourite": p.get("userId") in fav_ids} for p in found]
-    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS)
+    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS, query=query)
     if kind == "seller":
         _attach_pictures(posts)  # only for the posts being sent
     result = {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES}
@@ -361,7 +379,8 @@ def guest_feed(event):
     if not helpers._norm_zip(zip_code):
         return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
     map_only, limit, after = _paging_or_map(event)
-    if not map_only and after is None:
+    query = _search(event)
+    if not map_only and after is None and query is None:
         helpers.count_open(event, zip_code)  # guest Home opened (first page)
     cutoff = helpers.post_limit_cutoff()
     posts = []
@@ -369,10 +388,11 @@ def guest_feed(event):
         found = [{k: i[k] for k in FEED_FIELDS if k in i} for i in _recent_posts(_table_for(kind, category), cutoff)]
         found = helpers.within_miles(zip_code, found, helpers.NEARBY_MILES)
         posts += [{**p, "category": category} for p in found]
-    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS)
+    # Contact details are masked first, so a search can't match on a hidden phone number or email.
+    posts = [_guest_post(p) for p in posts]
+    posts, next_cursor = _finish(posts, map_only, limit, after, default_cap=NEARBY_MAX_POSTS, query=query)
     if kind == "seller":
         _attach_pictures(posts)  # only for the posts being sent
-    posts = [_guest_post(p) for p in posts]
     result = {"Items": posts, "Count": len(posts), "radiusMiles": helpers.NEARBY_MILES}
     if limit is not None:
         result["nextCursor"] = next_cursor

@@ -20,6 +20,9 @@ Area run (that payload) saves up to about 36 cards for the week:
     different set.
   - Events this week (Ticketmaster Discovery API, music and arts & theatre within AREA_MILES),
     up to MAX_EVENTS. Skipped while the key isn't in SSM.
+  - What people searched for on Home in the area over the last 4 weeks (search.popular_searches,
+    counts per vocabulary key in eabu-rate-limit) goes into the prompt as a hint, e.g. "people nearby
+    have been searching for: Japanese (sushi, ramen)", within the same counts and search budget.
 Rows expire after EXPIRE_DAYS (DynamoDB TTL on expiresAt).
 
 Table rows (eabu-discovered, key areaZip + ID):
@@ -50,7 +53,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-from my_utils import content_filter, helpers
+from my_utils import content_filter, helpers, search
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -301,24 +304,27 @@ def min_reviews(topic):
     return MIN_REVIEWS["eat" if topic == "eat" else "lifestyle"]
 
 
-def build_ask(area_zip, topics, avoid, today):
+def build_ask(area_zip, topics, avoid, today, popular=()):
     where = f"PIN code {area_zip}, India" if helpers.country_of_zip(area_zip) == "IN" else f"ZIP {area_zip}"
     lines = [f"Today is {today:%A, %B %d, %Y}. Find top-rated places near {where}:",
              f"- eat: up to {EAT_PLACES} {EAT_WHAT} (at least {MIN_REVIEWS['eat']} reviews)"]
     lines += [f"- {t}: up to {LIFESTYLE_PER_TOPIC} {what} (at least {min_reviews(t)} reviews)"
               for t, what in topics]
+    hint = search.monday_hint(popular, ["eat"] + [t for t, _ in topics])
+    if hint:  # what people searched for on Home: steers the picks, same counts and budget
+        lines.append(hint)
     if avoid:
         lines.append("These were shown recently, so pick different places: " + "; ".join(avoid[:40]))
     return "\n".join(lines)
 
 
-def ask_claude(area_zip, topics, avoid, today):
+def ask_claude(area_zip, topics, avoid, today, popular=()):
     tools = [
         {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES},
         {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_FETCHES, "max_content_tokens": 8000},
         SAVE_TOOL,
     ]
-    messages = [{"role": "user", "content": build_ask(area_zip, topics, avoid, today)}]
+    messages = [{"role": "user", "content": build_ask(area_zip, topics, avoid, today, popular)}]
     usage = {"input": 0, "output": 0, "searches": 0}
     for _ in range(6):  # pause_turn resumes
         res = _claude().messages.create(model=MODEL, max_tokens=24000, output_config={"effort": "medium"},
@@ -630,7 +636,8 @@ def run_area(event, now=None):
     events = pick_events(fetch_events(area_zip, now), today=today, area_zip=area_zip)
     topics = topics_for_week(week)
     avoid = sorted(recent)
-    raw, usage = ask_claude(area_zip, topics, avoid, today)
+    popular = search.popular_searches(helpers._rate_limit_table(), area_zip, now)
+    raw, usage = ask_claude(area_zip, topics, avoid, today, popular)
     places = [{**place_row(p, today), **geocode(p["address_or_area"], area_zip)}
               for p in check_places(raw, topics, recent, today)]
     cards = places + events

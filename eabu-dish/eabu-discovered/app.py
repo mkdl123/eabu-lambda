@@ -9,6 +9,11 @@ first search starts at once (cards appear a minute or two later); at most NEW_AR
 a day (UTC), beyond that it waits for Monday. Viewing an area marks it (lastViewedAt, at most
 once a day) so the Monday run keeps searching it; unviewed areas drop out after 28 days.
 
+With ?q= (Search on Home, e.g. "italian food", "dog parks") only the matching cards come back, best match
+first (my_utils/search.py; no web search, nothing extra is paid for), plus "query": {"keys", "words", "fixed" (misspellings and what they were read as, e.g. {"chienese": "chinese"})}. Each
+search adds one to its vocabulary keys for the area this week (search.count_search; never the typed text
+or who searched), which the Monday run uses to pick what to look for.
+
 GET /guest/discovered?zip=&v=2 is the same for guests (public route, no sign-in; rate limited
 per IP address).
 
@@ -33,7 +38,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-from my_utils import helpers
+from my_utils import helpers, search
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -217,6 +222,9 @@ def lambda_handler(event, context):
         version = 1
     if not helpers._norm_zip(zip_code):
         return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
+    query = None
+    if params.get("q") is not None:
+        query = search.parse_query(params.get("q"))
     try:
         areas, finds = _load()
     except (BotoCoreError, ClientError):
@@ -247,7 +255,13 @@ def lambda_handler(event, context):
         latest = max(int(f["ID"]) // 100 for f in items)
         items = sorted((f for f in items if int(f["ID"]) // 100 == latest), key=lambda f: int(f["ID"]))
         items = for_client(items, version, now)
+    if query is not None:
+        items = search.rank(items, query, search.card_score)
+        search.count_search(helpers._rate_limit_table(), centre or zip5, query["keys"])
     out = [{k: str(f.get(k, "")) for k in FIELDS} for f in items]
     pending = bool(centre and not items and (areas.get(centre) or {}).get("pending"))
-    return helpers._response(200, {"areaZip": centre, "weekOf": items[0].get("weekOf") if items else None,
-                                   "pending": pending, "Items": out, "Count": len(out)})
+    result = {"areaZip": centre, "weekOf": items[0].get("weekOf") if items else None,
+              "pending": pending, "Items": out, "Count": len(out)}
+    if query is not None:
+        result["query"] = {"keys": query["keys"], "words": query["words"], "fixed": query["fixed"]}
+    return helpers._response(200, result)
