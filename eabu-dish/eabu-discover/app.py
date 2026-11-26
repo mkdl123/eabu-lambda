@@ -14,7 +14,7 @@ Monday run (scheduled event):
 Area run (that payload) saves up to about 36 cards for the week:
   - Top-rated places (Claude, MODEL, with web search): EAT_PLACES restaurants/cafes, plus
     LIFESTYLE_PER_TOPIC places for each Lifestyle topic (LIFESTYLE_TOPICS: fitness, yoga,
-    beauty and pets, all every week). A place is kept only if Claude saw a
+    beauty, pets and dog parks, all every week; dog parks since 2026-11-26). A place is kept only if Claude saw a
     rating of at least MIN_RATING with enough reviews on a specific https page, it passes the
     content filter, and it wasn't shown in the last SKIP_DAYS days, so each week brings a
     different set.
@@ -77,6 +77,7 @@ MAX_EVENTS = 4
 EVENT_DAYS = 7
 MIN_RATING = 3.0
 MIN_REVIEWS = {"eat": 50, "lifestyle": 15}   # small studios and vets have fewer reviews
+TOPIC_MIN_REVIEWS = {"dogparks": 5}          # public parks get far fewer reviews than businesses
 MAX_SEARCHES = 30
 MAX_FETCHES = 16
 MAX_PER_SOURCE = 3      # a "best yoga near X" list page may back a few places
@@ -85,12 +86,13 @@ AREA_ROW = 0
 POST_TABLES = [f"{c}_{r}" for c in ("EAT", "LIVE", "MOVE", "LIFESTYLE") for r in ("CONSUMER", "PROVIDER")]
 LIMITS = {"name": 100, "place_type": 60, "address_or_area": 150, "what": 300, "rating_site": 40}
 
-# (topic, what to search for). All four every week.
+# (topic, what to search for). All of them every week.
 LIFESTYLE_TOPICS = [
     ("fitness", "gyms and fitness studios (strength, boxing, cycling, martial arts)"),
     ("yoga", "yoga and pilates studios"),
     ("beauty", "hair salons, nail salons, barbers and day spas"),
     ("pets", "veterinarians, pet groomers, dog daycare and pet boarding"),
+    ("dogparks", "dog parks and off-leash dog areas (public parks count; fenced areas preferred)"),
 ]
 EAT_WHAT = ("restaurants of different cuisines (sit-down or takeout), with at most one cafe, bakery "
             "or dessert shop")
@@ -105,6 +107,7 @@ PHOTO_KEYS = {
     "yoga": ["yoga", "gym"],
     "beauty": ["salon", "barber", "nails", "spa"],
     "pets": ["vet", "groomer", "pet"],
+    "dogparks": ["pet"],
 }
 ALL_PHOTO_KEYS = sorted({k for keys in PHOTO_KEYS.values() for k in keys})
 
@@ -132,7 +135,8 @@ SAVE_TOOL = {
                         "photo": {"type": "string", "enum": ALL_PHOTO_KEYS,
                                   "description": "The closest picture for the card: for eat the cuisine or kind of place "
                                                  "('restaurant' if none fits); fitness gym/yoga/boxing/cycling/swim; "
-                                                 "yoga yoga; beauty salon/barber/nails/spa; pets vet/groomer/pet"},
+                                                 "yoga yoga; beauty salon/barber/nails/spa; pets vet/groomer/pet; "
+                                                 "dogparks pet"},
                         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                     },
                     "required": ["topic", "name", "place_type", "photo", "address_or_area", "what", "rating",
@@ -162,6 +166,9 @@ Rules:
 - Within about 25 miles (40 km) of the postal code. Prefer independent local businesses; at most one national chain per
   category, and only if it is clearly loved locally.
 - The place must still be open (skip anything marked closed or permanently closed).
+- Dog parks are usually public parks rather than businesses: the independent-business and chain rule doesn't
+  apply to them. Give the park's street address or entrance, and say in "what" whether it is fenced, has
+  separate areas for small and large dogs, water or shade, when the page shows it.
 - Spread your picks across the area, not all on one street, and across different kinds within a category.
 - Write descriptions in your own words; don't copy review text. No prices or promises you didn't see.
 - Give each place's street address when the page shows it (it puts the place on the app's map).
@@ -210,7 +217,7 @@ def week_start(today=None):
 
 
 def topics_for_week(week):
-    """This week's Lifestyle topics: all four every week (until 2026-11-23 they alternated two by two)."""
+    """This week's Lifestyle topics: all of them every week (until 2026-11-23 they alternated two by two)."""
     return list(LIFESTYLE_TOPICS)
 
 
@@ -287,11 +294,18 @@ def dispatch(context, now=None):
 # ---------------------------------------------------------------------------
 # Area run, places: ask Claude, check
 # ---------------------------------------------------------------------------
+def min_reviews(topic):
+    """Fewest reviews a place in this topic needs."""
+    if topic in TOPIC_MIN_REVIEWS:
+        return TOPIC_MIN_REVIEWS[topic]
+    return MIN_REVIEWS["eat" if topic == "eat" else "lifestyle"]
+
+
 def build_ask(area_zip, topics, avoid, today):
     where = f"PIN code {area_zip}, India" if helpers.country_of_zip(area_zip) == "IN" else f"ZIP {area_zip}"
     lines = [f"Today is {today:%A, %B %d, %Y}. Find top-rated places near {where}:",
              f"- eat: up to {EAT_PLACES} {EAT_WHAT} (at least {MIN_REVIEWS['eat']} reviews)"]
-    lines += [f"- {t}: up to {LIFESTYLE_PER_TOPIC} {what} (at least {MIN_REVIEWS['lifestyle']} reviews)"
+    lines += [f"- {t}: up to {LIFESTYLE_PER_TOPIC} {what} (at least {min_reviews(t)} reviews)"
               for t, what in topics]
     if avoid:
         lines.append("These were shown recently, so pick different places: " + "; ".join(avoid[:40]))
@@ -425,7 +439,7 @@ def check_places(places, topics, recent=(), today=None):
             count = int(p.get("rating_count"))
         except (TypeError, ValueError):
             continue
-        if rating is None or count < MIN_REVIEWS[category]:
+        if rating is None or count < min_reviews(topic):
             continue
         site = _specific_https(p.get("source_url"))
         if not site:

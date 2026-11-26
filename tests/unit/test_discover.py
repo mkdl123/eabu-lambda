@@ -112,8 +112,27 @@ def test_all_lifestyle_topics_every_week():
     fn = load("eabu-discover")
     from datetime import timedelta
     for days in (0, 7):
-        assert [t for t, _ in fn.topics_for_week(TODAY + timedelta(days=days))] == ["fitness", "yoga", "beauty", "pets"]
+        assert [t for t, _ in fn.topics_for_week(TODAY + timedelta(days=days))] == ["fitness", "yoga", "beauty", "pets", "dogparks"]
     assert (fn.EAT_PLACES, fn.LIFESTYLE_PER_TOPIC, fn.SKIP_DAYS) == (12, 5, 14)
+
+
+def test_dog_parks_need_fewer_reviews_and_use_the_pet_photo():
+    fn = load("eabu-discover")
+    topics = [("pets", ""), ("dogparks", "")]
+    park = dict(topic="dogparks", place_type="Dog park", photo="pet", rating=4.4, rating_count=7)
+    kept = fn.check_places([
+        place(name="Rose Tree Dog Park", source_url="https://www.yelp.com/biz/rose-tree-dog-park", **park),
+        place(name="Tiny Vet", topic="pets", photo="vet", rating_count=7,                # pets still need 15
+              source_url="https://www.yelp.com/biz/tiny-vet"),
+        place(name="Two Reviews Park", source_url="https://www.yelp.com/biz/two", **{**park, "rating_count": 2}),
+        place(name="Odd Photo Park", source_url="https://www.yelp.com/biz/odd", **{**park, "photo": "pizza"}),
+    ], topics)
+    assert {k["name"]: k["photo"] for k in kept} == {"Rose Tree Dog Park": "pet", "Odd Photo Park": ""}
+    assert all(k["category"] == "lifestyle" and k["topic"] == "dogparks" for k in kept)
+    ask = fn.build_ask("19060", fn.topics_for_week(TODAY), [], TODAY)
+    assert "- dogparks: up to 5 dog parks" in ask and "(at least 5 reviews)" in ask
+    assert "- pets: up to 5 veterinarians, pet groomers, dog daycare and pet boarding (at least 15 reviews)" in ask
+    assert "Dog parks are usually public parks" in fn.SYSTEM
 
 
 def test_place_card_keeps_the_fields_older_builds_show():
