@@ -10,6 +10,9 @@ GET    /favourites-feed/{userId}/{kind}?zip=12345&nearby=1
                                                    of ?zip (not the user's own), favourites flagged with
                                                    isFavourite
 
+The first page of the nearby and guest feeds (not ?map=1, no ?cursor) counts an app open for
+that ZIP/PIN (helpers.count_open; read with scripts/opens.py).
+
 Both feeds page when given ?limit=N (1-50): the response then carries nextCursor, which is
 passed back as ?cursor= for the next N posts (null once there are no more). The cursor is the
 sort key of the last post sent, so posts added meanwhile don't shift or repeat later pages.
@@ -313,6 +316,8 @@ def nearby_feed(event, user_id, kind, zip_code):
     if not zip_code:
         return helpers._response(400, {"msg": "zip is required"})
     map_only, limit, after = _paging_or_map(event)
+    if not map_only and after is None:
+        helpers.count_open(event, zip_code)  # Home opened (first page), for scripts/opens.py
     fav_ids = {f["favUserId"] for f in _list(user_id, kind)}
     skip = _blocked_ids(user_id) | {user_id}
     cutoff = helpers.post_limit_cutoff()
@@ -356,6 +361,8 @@ def guest_feed(event):
     if not helpers._norm_zip(zip_code):
         return helpers._response(400, {"msg": "A ZIP or PIN code is required"})
     map_only, limit, after = _paging_or_map(event)
+    if not map_only and after is None:
+        helpers.count_open(event, zip_code)  # guest Home opened (first page)
     cutoff = helpers.post_limit_cutoff()
     posts = []
     for category in CATEGORIES:

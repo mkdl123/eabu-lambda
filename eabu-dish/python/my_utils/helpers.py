@@ -200,6 +200,55 @@ def rate_limited(handler):
 
 
 # ---------------------------------------------------------------------------
+# App opens per ZIP / PIN (scripts/opens.py reads them). Counted when Home loads its first feed
+# page. One row per UTC day and postal code in the eabu-rate-limit table:
+#   key "opens#YYYY-MM-DD#<zip>": guestOpens/userOpens (loads) and guestPeople/userPeople
+#   (different callers that day). Kept OPENS_KEEP_DAYS.
+# "People" is counted with a marker row per caller, keyed by a hash of day + caller (the User Id,
+# or the IP address for a guest) that deletes itself after 2 days. No User Id, IP address or
+# position is stored, only the postal code the app was already sending. Never fails the request.
+# ---------------------------------------------------------------------------
+OPENS_KEEP_DAYS = 400
+
+
+def count_open(event, zip_code, now=None):
+    z = _norm_zip(zip_code)
+    if not z:
+        return
+    now = now or datetime.now(timezone.utc)
+    day, ts = now.strftime("%Y-%m-%d"), int(now.timestamp())
+    caller = get_caller_id(event)
+    who = "user" if caller else "guest"
+    ident = str(caller).lower() if caller else source_ip(event)
+    try:
+        table = _rate_limit_table()
+        new_person = False
+        if ident:
+            digest = hashlib.sha256(f"{day}|{who}|{ident}".encode()).hexdigest()[:24]
+            try:
+                table.update_item(
+                    Key={"key": f"opener#{day}#{z}#{digest}"},
+                    UpdateExpression="SET expiresAt = :exp",
+                    ConditionExpression="attribute_not_exists(#k)",
+                    ExpressionAttributeNames={"#k": "key"},
+                    ExpressionAttributeValues={":exp": ts + 2 * 86400})
+                new_person = True
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+        add = f"{who}Opens :one" + (f", {who}People :one" if new_person else "")
+        table.update_item(
+            Key={"key": f"opens#{day}#{z}"},
+            UpdateExpression=f"ADD {add} SET #d = :day, zip = :zip, country = :c, "
+                             "expiresAt = if_not_exists(expiresAt, :exp)",
+            ExpressionAttributeNames={"#d": "day"},
+            ExpressionAttributeValues={":one": 1, ":day": day, ":zip": z, ":c": country_of_zip(z),
+                                       ":exp": ts + OPENS_KEEP_DAYS * 86400})
+    except Exception:  # noqa: BLE001 - a counter must never break the feed
+        logger.warning("Open count failed")
+
+
+# ---------------------------------------------------------------------------
 # Authentication / authorization
 #
 # The caller's identity comes ONLY from the Cognito claims that API Gateway
