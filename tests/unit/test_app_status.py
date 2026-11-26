@@ -56,3 +56,32 @@ def test_answer_is_cached_for_a_short_while():
     put(json.dumps({"paused": True}))
     res = fn.lambda_handler({"httpMethod": "GET"}, None)  # within CACHE_SECONDS: old answer
     assert json.loads(res["body"]) == {"paused": False}
+
+
+def put_version(value):
+    boto3.client("ssm", region_name="us-east-1").put_parameter(
+        Name="/eabu/app-version", Value=value, Type="String", Overwrite=True)
+
+
+@mock_aws
+def test_versions_are_added_when_set():
+    fn = load("eabu-app-status")
+    put_version(json.dumps({"latest": "2.3", "min": "2.0"}))
+    assert call(fn) == {"paused": False, "latestVersion": "2.3", "minVersion": "2.0"}
+    put(json.dumps({"paused": True, "message": "Back soon."}))
+    assert call(fn) == {"paused": True, "message": "Back soon.", "latestVersion": "2.3", "minVersion": "2.0"}
+
+
+@pytest.mark.parametrize("value", ['{"latest": "2.3 beta"}', '{"latest": ""}', '{"min": "two"}', "nope", '["2.3"]'])
+@mock_aws
+def test_malformed_versions_are_left_out(value):
+    fn = load("eabu-app-status")
+    put_version(value)
+    assert call(fn) == {"paused": False}
+
+
+@mock_aws
+def test_latest_only():
+    fn = load("eabu-app-status")
+    put_version(json.dumps({"latest": "2.3.1"}))
+    assert call(fn) == {"paused": False, "latestVersion": "2.3.1"}
