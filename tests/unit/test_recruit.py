@@ -166,3 +166,52 @@ def test_unsubscribe_marks_only_existing_rows(tmp_path):
         Key={"emailHash": r.email_hash("mayra@mayrascleans.com")})
     r.send(Args(path))
     assert rows_in_table()[h]["status"] == "unsubscribed"
+
+
+def write_xlsx(path, cells):
+    """Minimal .xlsx: column A = cells (shared strings), plus a B column that must be ignored."""
+    import zipfile
+    m = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    strings = "".join(f"<si><t>{c}</t></si>" for c in cells)
+    rows = "".join(f'<row r="{i}"><c r="A{i}" t="s"><v>{i - 1}</v></c>'
+                   f'<c r="B{i}" t="inlineStr"><is><t>other{i}@b.com</t></is></c></row>'
+                   for i in range(1, len(cells) + 1))
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("xl/workbook.xml", f'<workbook xmlns="{m}" xmlns:r="http://schemas.openxmlformats.org/'
+                   'officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/>'
+                   '</sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/'
+                   'package/2006/relationships"><Relationship Id="rId1" Type="x" '
+                   'Target="worksheets/sheet1.xml"/></Relationships>')
+        z.writestr("xl/sharedStrings.xml", f'<sst xmlns="{m}">{strings}</sst>')
+        z.writestr("xl/worksheets/sheet1.xml", f'<worksheet xmlns="{m}"><sheetData>{rows}</sheetData></worksheet>')
+
+
+PAGE = """<!doctype html><html><head><title>Advertise on eabu</title></head><body>
+<table id="email"><tr><td><p>Hi there,</p></td></tr>
+<tr><td><a href="mailto:admin@eabu.net?subject=Unsubscribe">Unsubscribe</a> ·
+eabu LLC, 600 N. 2nd Street, Harrisburg, PA 17101<br></td></tr></table>
+<!-- EDITOR (only works in a browser) -->
+<div id="eabu-editor-bar"><span>edit</span></div>
+<script id="eabu-editor-script">alert(1)</script>
+</body></html>"""
+
+
+def test_xlsx_column_a_picks_template_and_sends_page(tmp_path):
+    r = load_recruit()
+    (tmp_path / "marketing-email-business.html").write_text(PAGE)
+    xlsx = tmp_path / "ad.xlsx"
+    write_xlsx(xlsx, ["Email", "Joe@Shop.com ", "amy@bakery.net", "joe@shop.com"])
+    rows = r.read_rows(str(xlsx))
+    assert [x["email"] for x in rows] == ["joe@shop.com", "amy@bakery.net"]
+    assert r.xlsx_template(str(xlsx))[1].endswith("marketing-email-business.html")
+    assert r.xlsx_template(str(tmp_path / "seller-miami.xlsx"))[0] == "seller"
+    with pytest.raises(SystemExit):
+        r.xlsx_template(str(tmp_path / "foo.xlsx"))
+
+    subject, text, page = r.render_page(str(tmp_path / "marketing-email-business.html"),
+                                        "https://api.eabu.net/guest/unsubscribe?t=abc")
+    assert subject == "Advertise on eabu"
+    assert "eabu-editor" not in page and "alert(1)" not in page and "mailto:" not in page
+    assert "guest/unsubscribe?t=abc" in page and "guest/unsubscribe?t=abc" in text
+    assert "Harrisburg, PA 17101" in text

@@ -20,6 +20,14 @@ Review it and delete the rows you don't want, then send:
     python3 scripts/recruit.py send recruit/19060-cleaning-2026-11-27.csv --yes    # send (max 50/day)
     python3 scripts/recruit.py status
 
+A spreadsheet of your own works the same way: only column A (the emails) is read, and the file
+name picks the email. ad*.xlsx sends docs/marketing-email-business.html, seller*.xlsx sends
+docs/marketing-email-sellers.html (the subject is the page's <title>):
+
+    python3 scripts/recruit.py send ad.xlsx --to admin@eabu.net    # one preview
+    python3 scripts/recruit.py send seller.xlsx                    # who would get it
+    python3 scripts/recruit.py send seller.xlsx --yes              # send (same daily cap and dedupe)
+
 The invite is scripts/recruit_email/invite.{txt,html}, from "Muk at eabu <hello@invite.eabu.net>",
 replies to admin@eabu.net. Every business is emailed at most once ever: eabu-recruit keeps the
 sha256 of each email (never the email), and the footer's unsubscribe link
@@ -37,6 +45,8 @@ import re
 import sys
 import time
 import urllib.robotparser
+import xml.etree.ElementTree as ET
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from email.message import EmailMessage
@@ -63,6 +73,10 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recruit
 FROM = formataddr(("Muk at eabu", "hello@invite.eabu.net"))
 REPLY_TO = "admin@eabu.net"
 UNSUBSCRIBE_URL = "https://api.eabu.net/guest/unsubscribe?t={token}"
+DOCS_DIR = os.path.join(ROOT, "docs")
+# spreadsheet name (ad.xlsx, seller.xlsx, ad-miami.xlsx ...) -> email page sent to column A
+XLSX_TEMPLATES = {"ad": "marketing-email-business.html", "seller": "marketing-email-sellers.html",
+                  "sellers": "marketing-email-sellers.html"}
 DAILY_CAP = 50          # new sending address: build trust with mail providers slowly
 SEND_GAP_SECONDS = 2
 
@@ -288,7 +302,90 @@ def build_message(to, subject, text, page, unsubscribe_url):
     return msg
 
 
+XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+           "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+           "rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
+
+
+def xlsx_column_a(path):
+    """Text of every column A cell on the first sheet (no openpyxl needed)."""
+    with zipfile.ZipFile(path) as z:
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall("m:si", XLSX_NS):
+                shared.append("".join(t.text or "" for t in si.iter(f"{{{XLSX_NS['m']}}}t")))
+        book = ET.fromstring(z.read("xl/workbook.xml"))
+        rid = book.find("m:sheets/m:sheet", XLSX_NS).get(f"{{{XLSX_NS['r']}}}id")
+        rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+        target = next(r.get("Target") for r in rels.findall("rel:Relationship", XLSX_NS) if r.get("Id") == rid)
+        target = target.lstrip("/") if target.startswith("/") else "xl/" + target
+        sheet = ET.fromstring(z.read(target))
+    out = []
+    for c in sheet.iter(f"{{{XLSX_NS['m']}}}c"):
+        if not re.fullmatch(r"A\d+", c.get("r", "")):
+            continue
+        t, v = c.get("t"), c.find("m:v", XLSX_NS)
+        if t == "s" and v is not None:
+            out.append(shared[int(v.text)])
+        elif t == "inlineStr":
+            out.append("".join(x.text or "" for x in c.iter(f"{{{XLSX_NS['m']}}}t")))
+        elif v is not None:
+            out.append(v.text or "")
+    return out
+
+
+def xlsx_template(path):
+    """(kind, template path) from the spreadsheet's name, e.g. ad.xlsx -> ad, business email."""
+    stem = os.path.splitext(os.path.basename(path))[0].lower()
+    kind = re.split(r"[-_ .]", stem)[0]
+    if kind not in XLSX_TEMPLATES:
+        sys.exit(f"don't know which email to send for {os.path.basename(path)}: name it ad.xlsx "
+                 f"(business ad email) or seller.xlsx (sellers email)")
+    name = XLSX_TEMPLATES[kind]
+    for folder in (os.path.dirname(os.path.abspath(path)), DOCS_DIR):
+        if os.path.exists(os.path.join(folder, name)):
+            return kind, os.path.join(folder, name)
+    sys.exit(f"can't find {name} next to {path} or in docs/")
+
+
+def html_to_text(page):
+    page = re.sub(r"(?is)<(head|style|script)\b.*?</\1>", "", page)
+    page = re.sub(r'(?is)<div style="display:none.*?</div>', "", page)  # inbox preview text
+    page = re.sub(r"(?is)<!--.*?-->", "", page)
+    page = re.sub(r'(?is)<a [^>]*href="(https?://[^"]+)"[^>]*>\s*<img [^>]*alt="([^"]*)"[^>]*>\s*</a>',
+                  r"\2: \1", page)
+    page = re.sub(r"(?i)<br\s*/?>|</(p|h1|h2|tr|div)>", "\n", page)
+    text = html.unescape(re.sub(r"<[^>]+>", "", page))
+    lines = [" ".join(l.split()) for l in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() + "\n"
+
+
+def render_page(template, unsubscribe_url):
+    """(subject, text, html) for a docs/marketing-email-*.html page."""
+    page = open(template, encoding="utf-8").read()
+    # the in-browser editor (bar + script) never goes out
+    page = re.sub(r'(?is)<!-- EDITOR.*?-->\s*', "", page)
+    page = re.sub(r'(?is)<div id="eabu-editor-bar".*?</div>\s*', "", page)
+    page = re.sub(r'(?is)<script id="eabu-editor-script">.*?</script>\s*', "", page)
+    if "mailto:admin@eabu.net?subject=Unsubscribe" not in page or "eabu LLC," not in page:
+        sys.exit(f"{os.path.basename(template)}: footer needs the Unsubscribe link and the eabu LLC address")
+    page = page.replace("mailto:admin@eabu.net?subject=Unsubscribe", html.escape(unsubscribe_url, quote=True))
+    m = re.search(r"(?is)<title>(.*?)</title>", page)
+    subject = html.unescape(" ".join(m.group(1).split())) if m else "eabu"
+    text = html_to_text(page).replace("Unsubscribe ·", f"Unsubscribe: {unsubscribe_url}\n")
+    return subject, text, page
+
+
 def read_rows(path):
+    if path.lower().endswith(".xlsx"):
+        kind, _ = xlsx_template(path)
+        rows, seen = [], set()
+        for cell in xlsx_column_a(path):  # a header such as "Email" isn't an email, so it drops out
+            e = clean_email(cell)
+            if e and e not in seen:
+                seen.add(e)
+                rows.append({"name": e, "email": e, "category": kind, "city": "", "zip": ""})
+        return rows
     rows, seen = [], set()
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
@@ -312,8 +409,17 @@ def already_contacted(table, hashes):
 
 
 def send(args):
+    template = xlsx_template(args.csv)[1] if args.csv.lower().endswith(".xlsx") else None
+    if template:
+        print(f"sending {os.path.relpath(template, ROOT)} to column A of {os.path.basename(args.csv)}")
+
+    def make(row, unsubscribe_url):
+        if template:
+            return render_page(template, unsubscribe_url)
+        return render(row, address)
+
     address = postal_address()
-    if not address and not args.to:  # previews may go out without it; real invites never
+    if not address and not args.to and not template:  # previews may go out without it; real invites never
         sys.exit('No postal address yet (required by US law in every marketing email). Set it once:\n'
                  '  python3 scripts/recruit.py address "PO Box 1, Town, ST 12345"')
     rows = read_rows(args.csv)
@@ -322,9 +428,9 @@ def send(args):
     if args.to:
         if not rows:
             sys.exit("no rows with an email in that file")
-        subject, text, page = render(rows[0], address)
-        msg = build_message(args.to, "[PREVIEW] " + subject, text, page,
-                            UNSUBSCRIBE_URL.format(token="0" * 64))
+        preview_url = UNSUBSCRIBE_URL.format(token="0" * 64)
+        subject, text, page = make(rows[0], preview_url)
+        msg = build_message(args.to, "[PREVIEW] " + subject, text, page, preview_url)
         ses.send_email(Content={"Raw": {"Data": msg.as_bytes()}})
         print(f"preview for {rows[0]['name']} sent to {args.to} (nothing recorded)")
         return
@@ -352,7 +458,7 @@ def send(args):
                            ConditionExpression="attribute_not_exists(emailHash)")
         except table.meta.client.exceptions.ConditionalCheckFailedException:
             continue
-        subject, text, page = render(r, address)
+        subject, text, page = make(r, UNSUBSCRIBE_URL.format(token=h))
         try:
             ses.send_email(Content={"Raw": {"Data": build_message(
                 r["email"], subject, text, page, UNSUBSCRIBE_URL.format(token=h)).as_bytes()}})
@@ -408,7 +514,7 @@ def main():
     f.add_argument("--crawl", action="store_true",
                    help="visit websites: find missing emails, drop dead sites (slower)")
     sp = sub.add_parser("send", help="email the invite to the businesses in a reviewed CSV")
-    sp.add_argument("csv")
+    sp.add_argument("csv", help="a reviewed recruit/*.csv, or ad.xlsx / seller.xlsx (emails in column A)")
     sp.add_argument("--yes", action="store_true", help="really send (without it: list who would get it)")
     sp.add_argument("--limit", type=int, default=DAILY_CAP, help=f"at most this many (daily cap {DAILY_CAP})")
     sp.add_argument("--to", help="send one preview of the first row to this address instead")

@@ -6,6 +6,8 @@
 #   ./scripts/recruit-run.sh <zip> <category> new     # make a fresh list (replaces today's list for that ZIP/category)
 #   ./scripts/recruit-run.sh <file.csv> test          # same, with a list you choose (never searches)
 #   ./scripts/recruit-run.sh <file.csv> send
+#   ./scripts/recruit-run.sh ad.xlsx test|send        # emails in column A get docs/marketing-email-business.html
+#   ./scripts/recruit-run.sh seller.xlsx test|send    # emails in column A get docs/marketing-email-sellers.html
 #
 #   e.g. ./scripts/recruit-run.sh 33130 catering test
 #        ./scripts/recruit-run.sh recruit/33130-catering-2026-11-27.csv send
@@ -16,15 +18,15 @@
 # ZIP/category, so your edits are kept; only "new" (or no list yet) searches again.
 set -euo pipefail
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 PREVIEW_TO="${PREVIEW_TO:-admin@eabu.net}"
 
-if [[ $# -eq 2 && "$1" == *.csv ]]; then
+if [[ $# -eq 2 && ( "$1" == *.csv || "$1" == *.xlsx ) ]]; then
   # a list given by the user: make its path absolute before changing folder
   [[ -f "$1" ]] || { echo "No such file: $1"; exit 2; }
   LIST="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
   ACTION="$2"
-  case "$ACTION" in test|send) ;; *) echo "With a CSV file the action is test or send"; exit 2 ;; esac
+  case "$ACTION" in test|send) ;; *) echo "With a CSV/xlsx file the action is test or send"; exit 2 ;; esac
   ZIP=""; CATEGORY=""
 elif [[ $# -eq 3 ]]; then
   ZIP="$1"; CATEGORY="$2"; ACTION="$3"
