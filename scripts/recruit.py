@@ -392,12 +392,24 @@ def read_rows(path):
                 rows.append({"name": e, "email": e, "category": kind, "city": "", "zip": ""})
         return rows
     rows, seen = [], set()
-    with open(path, newline="") as f:
-        for r in csv.DictReader(f):
-            e = clean_email(r.get("email"))
-            if e and e not in seen:
-                seen.add(e)
-                rows.append({**r, "email": e})
+    # utf-8-sig drops the BOM Excel adds; Numbers/Excel may also put a title row above the header,
+    # so the header is the first row with an "email" column, not necessarily line 1
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        lines = list(csv.reader(f))
+    start = next((i for i, row in enumerate(lines)
+                  if "email" in [c.strip().lower() for c in row]), None)
+    if start is None:
+        return rows
+    header = [c.strip().lower() for c in lines[start]]
+    for values in lines[start + 1:]:
+        r = dict(zip(header, values))
+        e = clean_email(r.get("email"))
+        if e and e not in seen:
+            seen.add(e)
+            z = (r.get("zip") or "").strip()
+            if z.isdigit() and len(z) < 5:  # a spreadsheet turned 08830 into 8830
+                r["zip"] = z.zfill(5)
+            rows.append({**r, "email": e})
     return rows
 
 
