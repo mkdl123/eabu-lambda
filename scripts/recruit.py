@@ -77,6 +77,7 @@ DOCS_DIR = os.path.join(ROOT, "docs")
 # spreadsheet name (ad.xlsx, seller.xlsx, ad-miami.xlsx ...) -> email page sent to column A
 XLSX_TEMPLATES = {"ad": "marketing-email-business.html", "seller": "marketing-email-sellers.html",
                   "sellers": "marketing-email-sellers.html"}
+CAP_TIMEZONE = "America/New_York"  # the daily cap resets at midnight US Eastern
 DAILY_CAP = 50          # new sending address: build trust with mail providers slowly
 SEND_GAP_SECONDS = 2
 
@@ -408,6 +409,12 @@ def already_contacted(table, hashes):
     return found
 
 
+def send_day(now=None):
+    """The day the daily cap counts against: US Eastern, so it resets at midnight there."""
+    from zoneinfo import ZoneInfo
+    return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(CAP_TIMEZONE)).strftime("%Y-%m-%d")
+
+
 def send(args):
     template = xlsx_template(args.csv)[1] if args.csv.lower().endswith(".xlsx") else None
     if template:
@@ -438,7 +445,7 @@ def send(args):
     table = boto3.resource("dynamodb", region_name=REGION).Table(RECRUIT_TABLE)
     contacted = already_contacted(table, [email_hash(r["email"]) for r in rows])
     todo = [r for r in rows if email_hash(r["email"]) not in contacted]
-    day_key = "daily#" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    day_key = "daily#" + send_day()
     sent_today = int(table.get_item(Key={"emailHash": day_key}).get("Item", {}).get("count", 0))
     room = max(0, min(args.limit, DAILY_CAP - sent_today))
     print(f"{len(rows)} with an email, {len(rows) - len(todo)} already contacted or unsubscribed, "

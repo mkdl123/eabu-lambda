@@ -215,3 +215,12 @@ def test_xlsx_column_a_picks_template_and_sends_page(tmp_path):
     assert "eabu-editor" not in page and "alert(1)" not in page and "mailto:" not in page
     assert "guest/unsubscribe?t=abc" in page and "guest/unsubscribe?t=abc" in text
     assert "Harrisburg, PA 17101" in text
+
+
+def test_daily_cap_day_is_us_eastern():
+    from datetime import datetime, timezone
+    r = load_recruit()
+    # Friday 8 pm Eastern is already Saturday in UTC, but counts for Friday
+    assert r.send_day(datetime(2026, 11, 28, 1, 0, tzinfo=timezone.utc)) == "2026-11-27"
+    assert r.send_day(datetime(2026, 11, 28, 5, 30, tzinfo=timezone.utc)) == "2026-11-28"
+    assert r.send_day(datetime(2026, 7, 4, 3, 59, tzinfo=timezone.utc)) == "2026-07-03"  # EDT
