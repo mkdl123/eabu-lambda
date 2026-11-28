@@ -23,8 +23,11 @@ PREVIEW_TO="${PREVIEW_TO:-admin@eabu.net}"
 
 if [[ $# -eq 2 && ( "$1" == *.csv || "$1" == *.xlsx ) ]]; then
   # a list given by the user: make its path absolute before changing folder
-  [[ -f "$1" ]] || { echo "No such file: $1"; exit 2; }
-  LIST="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+  FILE="$1"
+  # a bare name like ad.xlsx: also look in the repo's recruit/ folder
+  [[ -f "$FILE" ]] || FILE="$(cd "$(dirname "$0")/.." && pwd)/recruit/$1"
+  [[ -f "$FILE" ]] || { echo "No such file: $1 (not here or in recruit/)"; exit 2; }
+  LIST="$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")"
   ACTION="$2"
   case "$ACTION" in test|send) ;; *) echo "With a CSV/xlsx file the action is test or send"; exit 2 ;; esac
   ZIP=""; CATEGORY=""
