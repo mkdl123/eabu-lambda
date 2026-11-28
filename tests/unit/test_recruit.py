@@ -224,3 +224,45 @@ def test_daily_cap_day_is_us_eastern():
     assert r.send_day(datetime(2026, 11, 28, 1, 0, tzinfo=timezone.utc)) == "2026-11-27"
     assert r.send_day(datetime(2026, 11, 28, 5, 30, tzinfo=timezone.utc)) == "2026-11-28"
     assert r.send_day(datetime(2026, 7, 4, 3, 59, tzinfo=timezone.utc)) == "2026-07-03"  # EDT
+
+
+@mock_aws
+def test_sheet_resends_only_after_30_days_and_never_after_unsubscribe(tmp_path):
+    r = load_recruit()
+    setup(tmp_path, [])
+    (tmp_path / "marketing-email-business.html").write_text(PAGE)
+    xlsx = tmp_path / "ad.xlsx"
+    write_xlsx(xlsx, ["a@shop.com", "b@shop.com", "c@shop.com"])
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("eabu-recruit")
+    a, b, c = (r.email_hash(e) for e in ("a@shop.com", "b@shop.com", "c@shop.com"))
+    r.send(Args(str(xlsx)))
+    first = rows_in_table()
+    assert all(first[h]["status"] == "sent" and int(first[h]["sendCount"]) == 1 for h in (a, b, c))
+
+    r.send(Args(str(xlsx)))  # same day: nobody again
+    assert all(int(rows_in_table()[h]["sendCount"]) == 1 for h in (a, b, c))
+
+    old = int(first[a]["sentAt"]) - 30 * 86400
+    table.update_item(Key={"emailHash": a}, UpdateExpression="SET sentAt = :t", ExpressionAttributeValues={":t": old})
+    table.update_item(Key={"emailHash": b}, UpdateExpression="SET sentAt = :t, #s = :u",
+                      ExpressionAttributeNames={"#s": "status"},
+                      ExpressionAttributeValues={":t": old, ":u": "unsubscribed"})
+    table.update_item(Key={"emailHash": c}, UpdateExpression="SET sentAt = :t",
+                      ExpressionAttributeValues={":t": old + 3600})  # 29 days 23 hours ago
+    r.send(Args(str(xlsx)))
+    now = rows_in_table()
+    assert int(now[a]["sendCount"]) == 2 and int(now[a]["sentAt"]) > old  # 30 days: sent again
+    assert now[b]["status"] == "unsubscribed" and "sendCount" in now[b] and int(now[b]["sendCount"]) == 1
+    assert int(now[c]["sendCount"]) == 1  # not yet 30 days
+
+    # CSV invites never repeat, however old
+    path = str(tmp_path / "list.csv")
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["name", "category", "email", "city", "zip"])
+        w.writeheader()
+        w.writerows(ROWS)
+    r.send(Args(path))
+    h = r.email_hash("fit@fitco.com")
+    table.update_item(Key={"emailHash": h}, UpdateExpression="SET sentAt = :t", ExpressionAttributeValues={":t": 1})
+    r.send(Args(path))
+    assert int(rows_in_table()[h]["sendCount"]) == 1

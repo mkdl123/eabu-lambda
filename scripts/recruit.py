@@ -28,6 +28,9 @@ docs/marketing-email-sellers.html (the subject is the page's <title>):
     python3 scripts/recruit.py send seller.xlsx                    # who would get it
     python3 scripts/recruit.py send seller.xlsx --yes              # send (same daily cap and dedupe)
 
+Run a sheet again any time: an address it already emailed gets the email again only once 30 days
+(RESEND_DAYS) have passed since its last email; unsubscribed addresses never. CSV invites go once ever.
+
 The invite is scripts/recruit_email/invite.{txt,html}, from "Muk at eabu <hello@invite.eabu.net>",
 replies to admin@eabu.net. Every business is emailed at most once ever: eabu-recruit keeps the
 sha256 of each email (never the email), and the footer's unsubscribe link
@@ -78,6 +81,7 @@ DOCS_DIR = os.path.join(ROOT, "docs")
 XLSX_TEMPLATES = {"ad": "marketing-email-business.html", "seller": "marketing-email-sellers.html",
                   "sellers": "marketing-email-sellers.html"}
 CAP_TIMEZONE = "America/New_York"  # the daily cap resets at midnight US Eastern
+RESEND_DAYS = 30        # marketing sheets: an address gets at most one email per 30 days
 DAILY_CAP = 50          # new sending address: build trust with mail providers slowly
 SEND_GAP_SECONDS = 2
 
@@ -398,15 +402,25 @@ def read_rows(path):
 
 
 def already_contacted(table, hashes):
-    found = set()
-    for i in range(0, len(hashes), 100):
-        keys = [{"emailHash": h} for h in hashes[i:i + 100]]
-        req = {RECRUIT_TABLE: {"Keys": keys, "ProjectionExpression": "emailHash"}}
+    """{emailHash: row} for the addresses already in eabu-recruit."""
+    found = {}
+    unique = list(dict.fromkeys(hashes))
+    for i in range(0, len(unique), 100):
+        keys = [{"emailHash": h} for h in unique[i:i + 100]]
+        req = {RECRUIT_TABLE: {"Keys": keys, "ProjectionExpression": "emailHash, #s, sentAt",
+                               "ExpressionAttributeNames": {"#s": "status"}}}
         while req:
             out = table.meta.client.batch_get_item(RequestItems=req)
-            found |= {item["emailHash"] for item in out["Responses"].get(RECRUIT_TABLE, [])}
+            found.update({item["emailHash"]: item for item in out["Responses"].get(RECRUIT_TABLE, [])})
             req = out.get("UnprocessedKeys") or None
     return found
+
+
+def due_again(item, now=None):
+    """A marketing-sheet address may get another email RESEND_DAYS after its last one (never if unsubscribed)."""
+    if item.get("status") != "sent" or not item.get("sentAt"):
+        return False
+    return int(item["sentAt"]) <= (now or time.time()) - RESEND_DAYS * 86400
 
 
 def send_day(now=None):
@@ -444,12 +458,16 @@ def send(args):
 
     table = boto3.resource("dynamodb", region_name=REGION).Table(RECRUIT_TABLE)
     contacted = already_contacted(table, [email_hash(r["email"]) for r in rows])
-    todo = [r for r in rows if email_hash(r["email"]) not in contacted]
+    # invites (CSV) go once ever; marketing sheets may repeat after RESEND_DAYS
+    todo = [r for r in rows if email_hash(r["email"]) not in contacted
+            or (template and due_again(contacted[email_hash(r["email"])]))]
+    repeats = sum(1 for r in todo if email_hash(r["email"]) in contacted)
     day_key = "daily#" + send_day()
     sent_today = int(table.get_item(Key={"emailHash": day_key}).get("Item", {}).get("count", 0))
     room = max(0, min(args.limit, DAILY_CAP - sent_today))
-    print(f"{len(rows)} with an email, {len(rows) - len(todo)} already contacted or unsubscribed, "
-          f"{len(todo)} new. Sent today: {sent_today}/{DAILY_CAP}, so this run sends {min(room, len(todo))}.")
+    held = f"emailed in the last {RESEND_DAYS} days or unsubscribed" if template else "already contacted or unsubscribed"
+    print(f"{len(rows)} with an email, {len(rows) - len(todo)} {held}, "
+          f"{len(todo) - repeats} new, {repeats} due again. Sent today: {sent_today}/{DAILY_CAP}, so this run sends {min(room, len(todo))}.")
     if not args.yes:
         for r in todo[:room]:
             print(f"  {r['name'][:40]:<40} {r['category']:<9} {r.get('city', '')[:18]:<18} {r['email']}")
@@ -459,10 +477,18 @@ def send(args):
     sent = 0
     for r in todo[:room]:
         h = email_hash(r["email"])
+        again = h in contacted
         try:
-            table.put_item(Item={"emailHash": h, "status": "sending", "category": r.get("category", ""),
-                                 "zip": r.get("zip", ""), "createdAt": int(time.time())},
-                           ConditionExpression="attribute_not_exists(emailHash)")
+            if again:  # claim it only if still sent and still 30+ days old (not unsubscribed meanwhile)
+                table.update_item(Key={"emailHash": h}, UpdateExpression="SET #s = :sending",
+                                  ConditionExpression="#s = :sent AND sentAt <= :cutoff",
+                                  ExpressionAttributeNames={"#s": "status"},
+                                  ExpressionAttributeValues={":sending": "sending", ":sent": "sent",
+                                                             ":cutoff": int(time.time()) - RESEND_DAYS * 86400})
+            else:
+                table.put_item(Item={"emailHash": h, "status": "sending", "category": r.get("category", ""),
+                                     "zip": r.get("zip", ""), "createdAt": int(time.time())},
+                               ConditionExpression="attribute_not_exists(emailHash)")
         except table.meta.client.exceptions.ConditionalCheckFailedException:
             continue
         subject, text, page = make(r, UNSUBSCRIBE_URL.format(token=h))
@@ -470,16 +496,20 @@ def send(args):
             ses.send_email(Content={"Raw": {"Data": build_message(
                 r["email"], subject, text, page, UNSUBSCRIBE_URL.format(token=h)).as_bytes()}})
         except Exception as e:
-            table.delete_item(Key={"emailHash": h})
+            if again:  # back to how it was: last sentAt unchanged
+                table.update_item(Key={"emailHash": h}, UpdateExpression="SET #s = :sent",
+                                  ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":sent": "sent"})
+            else:
+                table.delete_item(Key={"emailHash": h})
             print(f"  FAILED {r['name']}: {type(e).__name__}; stopping")
             break
-        table.update_item(Key={"emailHash": h}, UpdateExpression="SET #s = :s, sentAt = :t",
+        table.update_item(Key={"emailHash": h}, UpdateExpression="SET #s = :s, sentAt = :t ADD sendCount :one",
                           ExpressionAttributeNames={"#s": "status"},
-                          ExpressionAttributeValues={":s": "sent", ":t": int(time.time())})
+                          ExpressionAttributeValues={":s": "sent", ":t": int(time.time()), ":one": 1})
         table.update_item(Key={"emailHash": day_key}, UpdateExpression="ADD #c :one",
                           ExpressionAttributeNames={"#c": "count"}, ExpressionAttributeValues={":one": 1})
         sent += 1
-        print(f"  sent {r['name']}")
+        print(f"  sent {r['name']}" + (" (again)" if again else ""))
         time.sleep(SEND_GAP_SECONDS)
     print(f"sent {sent}")
 
