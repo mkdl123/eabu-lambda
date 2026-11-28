@@ -230,7 +230,7 @@ Parameters:
 
   ReportEmail:
     Type: String
-    Default: mdas@eabu.net
+    Default: admin@eabu.net
     Description: Where content reports (POST /report) are emailed for review. Must be an @eabu.net address while SES is in the sandbox.
 
   BlockedEmailsTableName:

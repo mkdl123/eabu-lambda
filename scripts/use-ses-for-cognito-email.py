@@ -21,7 +21,7 @@ REGION = "us-east-1"
 POOL_ID = "us-east-1_G0VobzUMd"
 DOMAIN = "eabu.net"
 FROM = "eabu <no-reply@eabu.net>"
-REPLY_TO = "mdas@eabu.net"
+REPLY_TO = "admin@eabu.net"
 SUBJECT = "Your eabu verification code"
 DROP = {("AdminCreateUserConfig", "UnusedAccountValidityDays")}
 
