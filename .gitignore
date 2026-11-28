@@ -245,3 +245,6 @@ $RECYCLE.BIN/
 # SAM build output and local deploy config (contains secrets)
 .aws-sam/
 samconfig.toml
+
+# seller-recruitment lists (other businesses contact details)
+recruit/

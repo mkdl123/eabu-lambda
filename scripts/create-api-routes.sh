@@ -73,6 +73,8 @@ ROUTES=(
   "POST /guest/forgot-password EabuEmailSignInFunction"
   "POST /guest/reset-password EabuEmailSignInFunction"
   "GET /guest/status EabuAppStatusFunction"
+  "GET /guest/unsubscribe EabuRecruitUnsubscribeFunction"
+  "POST /guest/unsubscribe EabuRecruitUnsubscribeFunction"
 )
 
 # Routes called by outside services rather than the app: no Cognito authorizer.
@@ -90,6 +92,8 @@ PUBLIC_ROUTES=(
   "POST /guest/forgot-password"
   "POST /guest/reset-password"
   "GET /guest/status"            # kill switch: the app's maintenance message; stays open while paused
+  "GET /guest/unsubscribe"       # seller-recruitment email footer link (token = email sha256)
+  "POST /guest/unsubscribe"      # one-click unsubscribe from the mail app (RFC 8058)
 )
 
 is_public() { # method path -> success when the route takes no Cognito sign-in

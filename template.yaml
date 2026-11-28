@@ -1412,6 +1412,25 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/app-status'
                 - !Sub 'arn:${AWS::Partition}:ssm:${Region}:${AWS::AccountId}:parameter/eabu/app-version'
 
+  # GET/POST /guest/unsubscribe?t= (public): unsubscribe link in seller-recruitment emails
+  # (scripts/recruit.py send). Marks the eabu-recruit row; the token is the email's sha256.
+  EabuRecruitUnsubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: eabu-dish/eabu-recruit-unsubscribe
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          RECRUIT_TABLE_NAME: eabu-recruit
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:dynamodb:${Region}:${AWS::AccountId}:table/eabu-recruit'
+
   # Report a post, request, offer, ad or profile (App Store guideline 1.2): saved + emailed for review.
   EabuReportFunction:
     Type: AWS::Serverless::Function
